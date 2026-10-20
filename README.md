@@ -30,5 +30,4 @@ de este repo es propio y tiene licencia MIT ([LICENSE](LICENSE)).
 ## Apoyar el proyecto
 
 Si te sirve, podés invitarme un café (desde 1 dólar) por [PayPal](https://www.paypal.com/paypalme/peporiro), también
-desde el botón **Sponsor** del repo. Y si te gustan los dibujos,
-apoyá también a su autor en [GitHub Sponsors](https://github.com/sponsors/JoseValencia125).
+desde el botón **Sponsor** del repo.

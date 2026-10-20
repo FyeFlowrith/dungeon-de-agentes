@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { leerSesiones } = require('./sesiones');
+const { irATerminal, SIN_ACCESIBILIDAD } = require('./terminal');
 
 const INTERVALO_MS = 2000;
 // Un pedido de abrir sesión que ninguna ventana tomó en este tiempo se descarta.
@@ -122,8 +123,22 @@ class DungeonView {
 
   async abrir(id, carpeta, enVsCode) {
     if (!enVsCode) {
-      // Un agente abierto en una terminal: abrirlo en el panel crearía una segunda copia de la conversación.
-      vscode.window.showInformationMessage('Ese agente corre en una terminal, no en VS Code: contestale ahí.');
+      // Un agente abierto en una terminal: abrirlo en el panel crearía una segunda copia de la
+      // conversación, así que lo llevo a la pestaña de la Terminal donde corre.
+      const s = (this.ultimas || []).find(x => x.id === id);
+      if (!s || !s.pid) return;
+      const motivo = await irATerminal(s.pid);
+      if (motivo === SIN_ACCESIBILIDAD) {
+        const abrirAjustes = 'Abrir Ajustes';
+        const r = await vscode.window.showWarningMessage(
+          'Para cambiar a la pestaña del agente en la Terminal, macOS necesita que Visual Studio Code tenga permiso de Accesibilidad. Activalo en Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y volvé a tocar la tarjeta.',
+          abrirAjustes);
+        if (r === abrirAjustes) {
+          vscode.env.openExternal(vscode.Uri.parse('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
+        }
+      } else if (motivo) {
+        vscode.window.showWarningMessage(motivo);
+      }
       return;
     }
     const propia = !carpeta || carpetasDeEstaVentana().some(c => mismaCarpeta(c, carpeta));
@@ -171,6 +186,7 @@ class DungeonView {
 
   refrescar() {
     const sesiones = leerSesiones(this.leerPineadas());
+    this.ultimas = sesiones;
     if (!this.view) return;
     const atencion = sesiones.filter(s => s.estado === 'blocked' || s.estado === 'limited').length;
     this.view.badge = atencion ? { value: atencion, tooltip: `${atencion} agente(s) te necesitan` } : undefined;

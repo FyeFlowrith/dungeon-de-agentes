@@ -16,6 +16,9 @@ que cambia según lo que está haciendo. Aparece con el ícono del personajito e
   empezar a escribir con la vista activa va directo a él, Esc lo borra.
 - Clic en una tarjeta: abre esa conversación, también si es de otra carpeta (trae al frente o abre la
   ventana de VS Code de esa carpeta, y esa ventana abre la sesión).
+- Si el agente corre en la **Terminal** (o iTerm2), el clic te lleva a su pestaña. La primera vez macOS
+  pide que Visual Studio Code pueda controlar la Terminal y que tenga permiso de **Accesibilidad** (la
+  Terminal solo deja cambiar de pestaña desde su menú Ventana). Lógica en `terminal.js`.
 - Requisitos: la extensión de **Claude Code** para VS Code, y macOS o Linux (en Windows las pineadas no
   se reconocen: se leen con `sqlite3`).
 

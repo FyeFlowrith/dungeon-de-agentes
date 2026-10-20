@@ -61,7 +61,7 @@
     est.textContent = ETIQUETA[s.estado] || s.estado;
     t.el.title = `${s.pineada ? '📌 Pineada · ' : ''}${s.titulo}\n${[s.repo, s.branch].filter(Boolean).join(' · ')}\n` +
       `${ETIQUETA[s.estado]}${s.detalle ? ' · ' + s.detalle : ''} · ${hace(s.edadMs)}\n` +
-      (s.enVsCode ? 'Clic para abrir la sesión' : 'Corre en una terminal');
+      (s.enVsCode ? 'Clic para abrir la sesión' : 'Clic para ir a su pestaña de la Terminal');
     t.el.setAttribute('aria-label', `${s.titulo}: ${ETIQUETA[s.estado]}${s.detalle ? ', ' + s.detalle : ''}`);
   }
 

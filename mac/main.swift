@@ -383,8 +383,16 @@ enum Foco {
     /// de Claude, que la abre en la ventana de VS Code que esté activa.
     static func irEnVsCode(id: String, carpeta: String) -> String? {
         let fm = FileManager.default
-        let dir = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Code/User/globalStorage/romina-local.dungeon-de-agentes")
+        // La carpeta de la extensión es «<publicador>.dungeon-de-agentes»: tomo la usada más recientemente
+        // (así anda con cualquier publicador, incluso si quedó instalada una versión vieja).
+        let global = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Code/User/globalStorage")
+        let candidatas = ((try? fm.contentsOfDirectory(at: global, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { $0.lastPathComponent.lowercased().hasSuffix(".dungeon-de-agentes") }
+        let dir = candidatas.max {
+            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return a < b
+        } ?? global.appendingPathComponent("fyeflowrith.dungeon-de-agentes")
         if !carpeta.isEmpty, fm.fileExists(atPath: dir.path), fm.fileExists(atPath: carpeta) {
             let pedido: [String: Any] = ["id": id, "carpeta": carpeta, "ts": Int(Date().timeIntervalSince1970 * 1000)]
             guard let data = try? JSONSerialization.data(withJSONObject: pedido),

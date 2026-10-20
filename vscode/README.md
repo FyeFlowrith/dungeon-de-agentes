@@ -65,3 +65,4 @@ que cambia según lo que está haciendo. Aparece con el ícono del personajito e
 
 Sprites de los cuartos y héroes: [Agents Pixel Dungeon](https://github.com/JoseValencia125/agents-pixel-dungeon),
 © 2026 Nacho Valencia · Diabolo Studio, licencia MIT (ver `media/LICENSE-agents-pixel-dungeon.txt`).
+Esta extensión no es oficial ni está afiliada a Agents Pixel Dungeon, Diabolo Studio ni Anthropic.

@@ -18,5 +18,16 @@ Cómo armar, instalar y diagnosticar cada una: en el README de su carpeta.
 
 ## Créditos
 
-Sprites de los cuartos y héroes: [Agents Pixel Dungeon](https://github.com/JoseValencia125/agents-pixel-dungeon),
-© 2026 Nacho Valencia · Diabolo Studio, licencia MIT.
+Los dibujos de los cuartos y los héroes son de **[Agents Pixel Dungeon](https://github.com/JoseValencia125/agents-pixel-dungeon)**,
+© 2026 Nacho Valencia · [Diabolo Studio](https://diabolostudio.com/), con licencia MIT (ver
+`LICENSE-agents-pixel-dungeon.txt` en `vscode/media/` y `mac/web/`). La idea de mostrar a los agentes
+como héroes en un dungeon también viene de ese proyecto.
+
+Este proyecto **no es oficial ni está afiliado** a Agents Pixel Dungeon, Diabolo Studio ni Anthropic: es
+una reimplementación independiente (extensión de VS Code y app de macOS) que reusa esos dibujos. El código
+de este repo es propio y tiene licencia MIT ([LICENSE](LICENSE)).
+
+## Apoyar el proyecto
+
+Si te sirve, podés invitarme un café con el botón **Sponsor** del repo. Y si te gustan los dibujos,
+apoyá también a su autor en [GitHub Sponsors](https://github.com/sponsors/JoseValencia125).

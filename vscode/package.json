@@ -2,23 +2,44 @@
   "name": "dungeon-de-agentes",
   "displayName": "Dungeon de agentes",
   "description": "Tus agentes de Claude Code vivos como héroes pixel-art, una tarjeta por agente.",
-  "version": "0.6.0",
-  "publisher": "romina-local",
+  "version": "0.7.0",
+  "publisher": "fyeflowrith",
+  "author": {
+    "name": "Romina Giménez"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FyeFlowrith/dungeon-de-agentes"
+  },
   "private": true,
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "dungeonAgentes", "title": "Dungeon de agentes", "icon": "media/icon.svg" }
+        {
+          "id": "dungeonAgentes",
+          "title": "Dungeon de agentes",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
       "dungeonAgentes": [
-        { "type": "webview", "id": "dungeonAgentes.view", "name": "Agentes" }
+        {
+          "type": "webview",
+          "id": "dungeonAgentes.view",
+          "name": "Agentes"
+        }
       ]
     }
   }

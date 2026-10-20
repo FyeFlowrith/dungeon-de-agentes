@@ -201,8 +201,9 @@ class DungeonView {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="${uri('view.css')}">
 </head><body>
+<div id="buscar"><input id="q" type="search" placeholder="Buscar agente…" autocomplete="off" spellcheck="false" aria-label="Buscar agente"></div>
 <div id="lista"></div>
-<p id="vacio" hidden>No hay sesiones de Claude con actividad reciente.</p>
+<p id="vacio" hidden>No hay agentes de Claude abiertos.</p>
 <script nonce="${nonce}">window.SPRITES = ${JSON.stringify(sprites)};</script>
 <script nonce="${nonce}" src="${uri('view.js')}"></script>
 </body></html>`;

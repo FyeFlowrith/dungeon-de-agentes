@@ -2,7 +2,7 @@
   "name": "dungeon-de-agentes",
   "displayName": "Dungeon de agentes",
   "description": "Tus agentes de Claude Code vivos como héroes pixel-art, una tarjeta por agente.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "romina-local",
   "license": "MIT",
   "private": true,

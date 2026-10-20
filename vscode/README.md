@@ -12,6 +12,8 @@ que cambia según lo que está haciendo. Aparece con el ícono del personajito e
 | SIN CUOTA | Llegó al límite de uso |
 
 - Orden: primero las conversaciones **pineadas** (📌), después las que te necesitan.
+- **Buscador** arriba de todo: filtra por nombre, carpeta o rama (sin importar mayúsculas ni acentos);
+  empezar a escribir con la vista activa va directo a él, Esc lo borra.
 - Clic en una tarjeta: abre esa conversación, también si es de otra carpeta (trae al frente o abre la
   ventana de VS Code de esa carpeta, y esa ventana abre la sesión).
 - Requisitos: la extensión de **Claude Code** para VS Code, y macOS o Linux (en Windows las pineadas no

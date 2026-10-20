@@ -65,18 +65,45 @@
     t.el.setAttribute('aria-label', `${s.titulo}: ${ETIQUETA[s.estado]}${s.detalle ? ', ' + s.detalle : ''}`);
   }
 
-  window.addEventListener('message', ev => {
-    const msg = ev.data;
-    if (msg.tipo !== 'sesiones') return;
-    const ids = new Set(msg.sesiones.map(s => s.id));
+  function mostrar(sesiones) {
+    const ids = new Set(sesiones.map(s => s.id));
     for (const [id, t] of tarjetas) if (!ids.has(id)) { t.el.remove(); tarjetas.delete(id); }
-    msg.sesiones.forEach((s, i) => {
+    sesiones.forEach((s, i) => {
       let t = tarjetas.get(s.id);
       if (!t) { t = crear(s); tarjetas.set(s.id, t); }
       actualizar(t, s);
       if (lista.children[i] !== t.el) lista.insertBefore(t.el, lista.children[i] || null);
     });
-    vacio.hidden = msg.sesiones.length > 0;
+    vacio.hidden = sesiones.length > 0;
+  }
+
+  // Buscador (si la página lo tiene): filtra por nombre, carpeta y rama, sin importar mayúsculas ni acentos.
+  const q = document.getElementById('q');
+  const textoVacio = vacio.textContent;
+  let todas = [];
+  const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+  function filtrar() {
+    const texto = q ? norm(q.value.trim()) : '';
+    const sesiones = texto ? todas.filter(s => norm(`${s.titulo} ${s.repo} ${s.branch}`).includes(texto)) : todas;
+    vacio.textContent = texto && todas.length ? `Ningún agente coincide con «${q.value.trim()}».` : textoVacio;
+    mostrar(sesiones);
+  }
+
+  if (q) {
+    q.addEventListener('input', filtrar);
+    q.addEventListener('keydown', e => { if (e.key === 'Escape') { q.value = ''; filtrar(); q.blur(); } });
+    // Empezar a escribir con la vista activa va directo al buscador.
+    document.addEventListener('keydown', e => {
+      if (document.activeElement !== q && e.key.length === 1 && e.key !== ' ' && !e.metaKey && !e.ctrlKey && !e.altKey) q.focus();
+    });
+  }
+
+  window.addEventListener('message', ev => {
+    const msg = ev.data;
+    if (msg.tipo !== 'sesiones') return;
+    todas = msg.sesiones;
+    filtrar();
   });
 
   // El cuarto (144×100) llena el lienzo de alto y se centra (recortando pared a los costados si la

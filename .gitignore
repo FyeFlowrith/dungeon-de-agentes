@@ -1,0 +1,4 @@
+# Paquetes y apps armados: se generan con los scripts de cada carpeta
+*.vsix
+mac/build/
+.DS_Store

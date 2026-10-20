@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dungeon de agentes</title>
+<link rel="stylesheet" href="view.css">
+<style>
+  :root {
+    --vscode-descriptionForeground: #9a8f84;
+    --vscode-focusBorder: #e8a33a;
+  }
+  html, body { background: #1e1a17; }
+  body { padding-top: 0; }
+
+  /* Buscador fijo arriba de todo */
+  #buscar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin: 0 -8px 10px;
+    padding: 8px 8px 6px;
+    background: #1e1a17;
+  }
+  #buscar { display: flex; gap: 6px; }
+  #q {
+    box-sizing: border-box;
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 10px;
+    border: 2px solid var(--borde);
+    border-radius: 6px;
+    background: var(--fondo-texto);
+    color: var(--texto);
+    font: 12px ui-monospace, Menlo, monospace;
+    outline: none;
+  }
+  #q::placeholder { color: var(--texto-suave); }
+  #q:focus { border-color: #a07a3a; }
+  #fijar {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 2px solid var(--borde);
+    border-radius: 6px;
+    background: var(--fondo-texto);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    filter: grayscale(1);
+    opacity: .55;
+  }
+  #fijar:hover { opacity: .85; }
+  #fijar[aria-pressed="true"] { filter: none; opacity: 1; border-color: #a07a3a; background: #3a2a1e; }
+  #fijar:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+  /* Tarjetas de tamaño fijo, una al lado de la otra a medida que entran */
+  #lista { display: flex; flex-direction: row; flex-wrap: wrap; gap: 10px; }
+  .card { width: 220px; flex: none; }
+</style>
+</head>
+<body>
+<div id="buscar"><input id="q" type="search" placeholder="Buscar agente…" autocomplete="off" spellcheck="false" aria-label="Buscar agente"><button id="fijar" type="button" aria-pressed="false" title="Siempre visible: dejar el dungeon por encima de todas las ventanas (⇧⌘T)" aria-label="Siempre visible">📌</button></div>
+<div id="lista"></div>
+<p id="vacio" hidden></p>
+<script>
+  // La vista es la misma de la extensión de VS Code: acá su canal con el editor pasa a ser la app nativa
+  // (window.webkit.messageHandlers.dungeon), que además llama a window.recibir() con los agentes.
+  window.SPRITES = {
+    heroes: 'heroes.png',
+    working: 'room_working.png',
+    workingFront: 'room_working_front.png',
+    blocked: 'room_blocked.png',
+    done: 'room_done.png',
+    idle: 'room_idle.png',
+    limited: 'room_limited.png',
+    unknown: 'room_unknown.png',
+  };
+  const nativo = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.dungeon;
+  window.acquireVsCodeApi = () => ({
+    postMessage(msg) { if (nativo) nativo.postMessage(msg); },
+  });
+
+  // Buscador: filtra por nombre, carpeta y rama, sin importar mayúsculas ni acentos.
+  const q = document.getElementById('q');
+  const vacio = document.getElementById('vacio');
+  let todas = [];
+  const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+  function aplicar() {
+    const texto = norm(q.value.trim());
+    const sesiones = texto
+      ? todas.filter(s => norm(`${s.titulo} ${s.repo} ${s.branch}`).includes(texto))
+      : todas;
+    vacio.textContent = todas.length === 0
+      ? 'No hay agentes de Claude abiertos. Abrí uno con claude en la Terminal.'
+      : `Ningún agente coincide con «${q.value.trim()}».`;
+    window.postMessage({ tipo: 'sesiones', sesiones }, '*');
+  }
+
+  window.recibir = sesiones => { todas = sesiones; aplicar(); };
+
+  // Botón «Siempre visible»: lo alterna la app nativa, que después avisa el estado.
+  const fijar = document.getElementById('fijar');
+  fijar.addEventListener('click', () => { if (nativo) nativo.postMessage({ tipo: 'siempreVisible' }); });
+  window.estadoSiempreVisible = activo => {
+    fijar.setAttribute('aria-pressed', activo ? 'true' : 'false');
+    fijar.title = activo
+      ? 'Siempre visible (prendido): clic para que vuelva a comportarse como una ventana común (⇧⌘T)'
+      : 'Siempre visible: dejar el dungeon por encima de todas las ventanas (⇧⌘T)';
+  };
+  q.addEventListener('input', aplicar);
+  q.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { q.value = ''; aplicar(); q.blur(); }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.metaKey && e.key.toLowerCase() === 'f') { e.preventDefault(); q.focus(); q.select(); return; }
+    // Empezar a escribir con la ventana activa va directo al buscador.
+    if (document.activeElement !== q && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && e.key !== ' ') q.focus();
+  });
+</script>
+<script src="view.js"></script>
+</body>
+</html>

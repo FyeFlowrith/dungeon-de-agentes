@@ -1,0 +1,25 @@
+{
+  "name": "dungeon-de-agentes",
+  "displayName": "Dungeon de agentes",
+  "description": "Tus agentes de Claude Code vivos como héroes pixel-art, una tarjeta por agente.",
+  "version": "0.4.0",
+  "publisher": "romina-local",
+  "license": "MIT",
+  "private": true,
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "dungeonAgentes", "title": "Dungeon de agentes", "icon": "media/icon.svg" }
+      ]
+    },
+    "views": {
+      "dungeonAgentes": [
+        { "type": "webview", "id": "dungeonAgentes.view", "name": "Agentes" }
+      ]
+    }
+  }
+}

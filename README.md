@@ -13,7 +13,9 @@ lleva a ese agente.
 
 - **El héroe en su cuarto**, según el estado del agente: TRABAJANDO (en el escritorio), TE NECESITA (con un
   «!», y la tarjeta late), TERMINÓ (festeja con un ✓), EN PAUSA (lee junto al fuego), SIN CUOTA (duerme en
-  la enfermería: llegó al límite de uso del plan).
+  la enfermería: llegó al límite de uso del plan). Un agente que ya te devolvió el turno pero dejó
+  **trabajo en segundo plano** (subagentes o un comando, por ejemplo un servidor) sigue en TRABAJANDO, y
+  la ayuda dice qué quedó corriendo.
 - **Su slime**, una mascota de un color propio por agente que reacciona al estado: da saltitos mientras
   trabaja, se esconde temblando detrás del héroe cuando te necesita, salta contento cuando terminó y duerme
   en pausa.
@@ -32,7 +34,8 @@ Todo sale de archivos que Claude Code ya guarda en tu Mac; no se consulta nada a
 
 | Dato | Fuente |
 | --- | --- |
-| Agentes vivos y su estado | `~/.claude/sessions/<pid>.json` (lo publica Claude Code por cada proceso: `busy` / `idle` / `waiting`) |
+| Agentes vivos y su estado | `~/.claude/sessions/<pid>.json` (lo publica Claude Code por cada proceso; sus estados posibles son `busy`, `shell` —libre con un comando corriendo en segundo plano—, `idle` y `waiting`) |
+| Trabajo en segundo plano | **subagentes**: las transcripciones en `<sesión>/subagents/` (y las de los workflows) que se escribieron en los últimos 45 s; **comandos**: las shells hijas del proceso de Claude (arrancan cargando `~/.claude/shell-snapshots/…`), contadas con `ps` solo cuando hay algún agente libre |
 | Título, rama, herramienta en uso, límite de uso | la transcripción de la sesión, `~/.claude/projects/*/<sessionId>.jsonl` |
 | Contexto usado | el `usage` de la última respuesta del agente (tokens nuevos + guardados); la ventana es de 1 millón en Opus 5.5 y Fable 5.1, y de 200 mil en el resto salvo que la sesión ya la haya pasado |
 | Gasto | el último `cost-state` (`totalCostUSD`) que Claude Code anota de a ratos en la transcripción |

@@ -180,6 +180,34 @@ final class Lector {
         }
     }
 
+    // Trabajo en segundo plano: si el agente principal quedó libre pero sus subagentes (o un workflow) siguen
+    // escribiendo su transcripción en <transcripción sin .jsonl>/subagents/…, la sesión sigue trabajando.
+    func subagentesActivos(_ transcripcion: String, ahora: Double) -> Int {
+        let dir = URL(fileURLWithPath: String(transcripcion.dropLast(".jsonl".count)))
+        guard let e = fm.enumerator(at: dir, includingPropertiesForKeys: [.contentModificationDateKey],
+                                    options: [.skipsHiddenFiles]) else { return 0 }
+        var activos = 0
+        for case let url as URL in e {
+            if e.level > 4 { e.skipDescendants(); continue }
+            guard url.pathExtension == "jsonl",
+                  let m = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else { continue }
+            if ahora - m.timeIntervalSince1970 * 1000 <= 45_000 { activos += 1 }
+        }
+        return activos
+    }
+
+    // Comandos que un agente dejó corriendo en segundo plano: cada comando de Claude es una shell hija de su
+    // proceso que arranca cargando ~/.claude/shell-snapshots/snapshot-…
+    func comandosDeFondoPorPid() -> [Int: Int] {
+        guard let salida = Foco.correr("/bin/ps", ["-axo", "pid=,ppid=,args="]) else { return [:] }
+        var porPadre: [Int: Int] = [:]
+        for l in salida.split(separator: "\n") where l.contains(".claude/shell-snapshots/snapshot-") {
+            let campos = l.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+            if campos.count >= 2, let padre = Int(campos[1]) { porPadre[padre, default: 0] += 1 }
+        }
+        return porPadre
+    }
+
     func ventana(_ info: Info?) -> Int {
         guard let info else { return 200_000 }
         if modelos1M.contains(info.modelo) || info.modelo.lowercased().contains("[1m]") || (info.contexto ?? 0) > 200_000 { return 1_000_000 }
@@ -297,7 +325,8 @@ final class Lector {
             let tool = pend.last ?? ""
             return ("working", toolDetalle[tool] ?? (tool.isEmpty ? "pensando" : "usando \(tool)"))
         }
-        if status == "idle" {
+        // `shell`: libre, pero con un comando que dejó corriendo en segundo plano (se resuelve en leer())
+        if status == "idle" || status == "shell" {
             let desde = ahora - ((p["statusUpdatedAt"] as? Double) ?? (p["updatedAt"] as? Double) ?? ahora)
             return desde <= terminoMaxMs ? ("done", "te respondió") : ("idle", "esperando")
         }
@@ -310,6 +339,7 @@ final class Lector {
         guard let archivos = try? fm.contentsOfDirectory(atPath: sessions.path) else { return [] }
         var out: [Sesion] = []
         var vistos = Set<String>()
+        var comandosFondo: [Int: Int]? = nil // se consulta una vez por lectura, solo si hace falta
         for f in archivos where f.range(of: "^\\d+\\.json$", options: .regularExpression) != nil {
             guard let data = fm.contents(atPath: sessions.appendingPathComponent(f).path),
                   let p = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -317,8 +347,20 @@ final class Lector {
             if let kind = p["kind"] as? String, kind != "interactive" { continue }
             if vistos.contains(sid) { continue }
             vistos.insert(sid)
-            let info = buscarTranscripcion(sid).flatMap { infoTranscripcion($0) }
-            let (est, detalle) = estado(p, info, ahora: ahora)
+            let transcripcion = buscarTranscripcion(sid)
+            let info = transcripcion.flatMap { infoTranscripcion($0) }
+            var (est, detalle) = estado(p, info, ahora: ahora)
+            if est == "done" || est == "idle" {
+                // Libre para Claude, pero con trabajo en segundo plano: subagentes o comandos que dejó corriendo
+                let sub = transcripcion.map { subagentesActivos($0, ahora: ahora) } ?? 0
+                if comandosFondo == nil { comandosFondo = comandosDeFondoPorPid() }
+                let cmd = comandosFondo?[pid] ?? 0
+                var partes: [String] = []
+                if sub > 0 { partes.append("\(sub) \(sub == 1 ? "subagente trabajando" : "subagentes trabajando")") }
+                if cmd > 0 { partes.append("\(cmd) \(cmd == 1 ? "comando corriendo" : "comandos corriendo")") }
+                if partes.isEmpty && (p["status"] as? String) == "shell" { partes.append("comando corriendo") } // Claude lo informa aunque no veamos la shell
+                if !partes.isEmpty { est = "working"; detalle = partes.joined(separator: " y ") + " en segundo plano" }
+            }
             let carpeta = (p["cwd"] as? String) ?? info?.carpeta ?? ""
             let enVsCode = (p["entrypoint"] as? String) == "claude-vscode"
             let ref = (p["statusUpdatedAt"] as? Double) ?? (p["updatedAt"] as? Double) ?? (p["startedAt"] as? Double) ?? ahora
@@ -358,12 +400,13 @@ enum Foco {
         p.arguments = args
         let out = Pipe()
         p.standardOutput = out
-        p.standardError = Pipe()
+        p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { return nil }
+        // Leer antes de esperar: con salidas grandes (ps) el comando se traba si nadie vacía el canal.
+        let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         guard p.terminationStatus == 0 else { return nil }
-        return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // Registro de diagnóstico en ~/Library/Logs/DungeonDeAgentes.log

@@ -212,7 +212,8 @@ function estadoDe(proc, info, ahora) {
     const tool = pend.length ? pend[pend.length - 1] : '';
     return { estado: 'working', detalle: TOOL_DETALLE[tool] || (tool ? `usando ${tool}` : 'pensando') };
   }
-  if (proc.status === 'idle') {
+  // `shell`: libre, pero con un comando que dejó corriendo en segundo plano (se resuelve en leerSesiones)
+  if (proc.status === 'idle' || proc.status === 'shell') {
     const desde = ahora - (proc.statusUpdatedAt || proc.updatedAt || ahora);
     return desde <= TERMINO_MAX_MS
       ? { estado: 'done', detalle: 'te respondió' }
@@ -222,6 +223,44 @@ function estadoDe(proc, info, ahora) {
 }
 
 const PRIORIDAD = { blocked: 0, limited: 1, done: 2, working: 3, unknown: 4, idle: 5 };
+
+// Trabajo en segundo plano: cuando el agente principal te devuelve el turno pero dejó subagentes (o un
+// workflow) trabajando, Claude lo informa como libre. Sus subagentes escriben su propia transcripción en
+// <transcripción sin .jsonl>/subagents/*.jsonl (y los workflows, más adentro): los que se escribieron hace
+// poco están trabajando.
+const FONDO_ACTIVO_MS = 45 * 1000;
+
+// Comandos que un agente dejó corriendo en segundo plano (un servidor, un build largo): cada comando que
+// corre Claude es una shell hija de su proceso que arranca cargando ~/.claude/shell-snapshots/snapshot-…
+function comandosDeFondoPorPid() {
+  let salida = '';
+  try { salida = require('child_process').execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,args='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 3000 }); }
+  catch { return new Map(); }
+  const porPadre = new Map();
+  for (const l of salida.split('\n')) {
+    const m = l.match(/^\s*\d+\s+(\d+)\s+(.*)$/);
+    if (!m || !m[2].includes('.claude/shell-snapshots/snapshot-')) continue;
+    porPadre.set(Number(m[1]), (porPadre.get(Number(m[1])) || 0) + 1);
+  }
+  return porPadre;
+}
+
+function subagentesActivos(transcripcion, ahora) {
+  const dir = transcripcion.replace(/\.jsonl$/, '');
+  let activos = 0;
+  const recorrer = (d, nivel) => {
+    let entradas = [];
+    try { entradas = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+      const ruta = path.join(d, e.name);
+      if (e.isDirectory()) { if (nivel < 3) recorrer(ruta, nivel + 1); continue; }
+      if (!e.name.endsWith('.jsonl')) continue;
+      try { if (ahora - fs.statSync(ruta).mtimeMs <= FONDO_ACTIVO_MS) activos++; } catch { /* se borró */ }
+    }
+  };
+  recorrer(dir, 0);
+  return activos;
+}
 
 function mismoTitulo(a, b) {
   const norm = s => (s || '').replace(/(…|\.\.\.)\s*$/, '').trim().toLowerCase();
@@ -344,6 +383,7 @@ function asignarNivelesDeGasto(sesiones) {
  * agente no esté corriendo. Primero las pineadas; dentro de cada grupo, las que te necesitan.
  */
 function leerSesiones(pineadas = []) {
+  let comandosFondo = null; // se consulta una vez por lectura, solo si hace falta
   const ahora = Date.now();
   const out = [];
   const vistos = new Set();
@@ -359,7 +399,18 @@ function leerSesiones(pineadas = []) {
     const file = buscarTranscripcion(proc.sessionId);
     let info = null;
     try { info = file ? infoTranscripcion(file) : null; } catch { info = null; }
-    const { estado, detalle } = estadoDe(proc, info, ahora);
+    let { estado, detalle } = estadoDe(proc, info, ahora);
+    if (estado === 'done' || estado === 'idle') { // también con status `shell` de Claude
+      // Libre para Claude, pero con trabajo en segundo plano: subagentes o comandos que dejó corriendo
+      const sub = file ? subagentesActivos(file, ahora) : 0;
+      if (!comandosFondo) comandosFondo = comandosDeFondoPorPid();
+      const cmd = comandosFondo.get(proc.pid) || 0;
+      const partes = [];
+      if (sub) partes.push(`${sub} ${sub === 1 ? 'subagente trabajando' : 'subagentes trabajando'}`);
+      if (cmd) partes.push(`${cmd} ${cmd === 1 ? 'comando corriendo' : 'comandos corriendo'}`);
+      if (!partes.length && proc.status === 'shell') partes.push('comando corriendo'); // Claude lo informa aunque no veamos la shell
+      if (partes.length) { estado = 'working'; detalle = `${partes.join(' y ')} en segundo plano`; }
+    }
     const carpeta = proc.cwd || (info && info.carpeta) || '';
     out.push(tarjeta(proc.sessionId, proc, info, carpeta, estado, detalle, ahora));
   }
@@ -397,4 +448,4 @@ function leerSesiones(pineadas = []) {
   return out;
 }
 
-module.exports = { leerSesiones, costosDelHistorial };
+module.exports = { leerSesiones, costosDelHistorial, subagentesActivos, comandosDeFondoPorPid };

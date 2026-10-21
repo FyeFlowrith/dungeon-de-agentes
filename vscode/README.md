@@ -5,7 +5,7 @@ que cambia según lo que está haciendo. Aparece con el ícono del personajito e
 
 | Estado | Cuándo |
 | --- | --- |
-| TRABAJANDO | Claude informa `busy` |
+| TRABAJANDO | Claude informa `busy`; o está libre (`idle` / `shell`) pero tiene subagentes o comandos corriendo en segundo plano |
 | TE NECESITA | Claude informa `waiting`, o te hizo una pregunta / espera que apruebes un plan |
 | TERMINÓ | Claude informa `idle` desde hace menos de 20 min |
 | EN PAUSA | `idle` desde hace más de 20 min, o pestaña pineada sin agente corriendo |

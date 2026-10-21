@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"hola"}}
+{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed","message":{"model":"<synthetic>","role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"Failed to authenticate: OAuth session expired and could not be refreshed"}]}}

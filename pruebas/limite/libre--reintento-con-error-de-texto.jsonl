@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"hola"}}
+{"type":"system","subtype":"api_error","level":"error","error":"429 rate limit: usage limit reached","retryInMs":1000,"retryAttempt":1,"maxRetries":10,"source":"request_retry"}

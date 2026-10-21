@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"hola"}}
+{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"message":{"model":"<synthetic>","role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your org's monthly spend limit · raise it at claude.ai/admin-settings/usage"}]}}

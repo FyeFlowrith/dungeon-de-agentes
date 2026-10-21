@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"hola"}}
+{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"quotaLimits":{"status":"rejected","resetsAt":1790042400,"rateLimitType":"seven_day","overageStatus":"rejected","isUsingOverage":false},"message":{"model":"<synthetic>","role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your org's monthly spend limit · run /usage-credits to raise it"}]}}

@@ -68,6 +68,10 @@ aparecen todos los datos. Qué es cada cosa y de dónde sale: en el [README prin
    `"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"`.)
 3. Recargá la ventana. Subí el `version` de `package.json` en cada cambio para que VS Code lo tome.
 
+Si tocaste cómo se lee la transcripción, armá la app de macOS (`../mac/armar.sh`) y corré
+`../pruebas/limite.sh`: pasa transcripciones de ejemplo por las dos y avisa si alguna deduce mal el
+«sin cuota» o si no coinciden entre sí.
+
 ## Créditos
 
 Sprites de los cuartos y héroes: [Agents Pixel Dungeon](https://github.com/JoseValencia125/agents-pixel-dungeon),

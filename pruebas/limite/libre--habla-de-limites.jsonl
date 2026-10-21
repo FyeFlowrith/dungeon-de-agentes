@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"hola"}}
+{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"La regex detecta usage limit reached y You have hit your session limit en lo que escribe el agente."}]}}

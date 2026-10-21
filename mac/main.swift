@@ -93,11 +93,6 @@ final class Lector {
         return arr.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined(separator: " ")
     }
 
-    // «You've hit your limit», «…your session limit», «…your org's monthly spend limit», «usage limit reached».
-    private func esAvisoLimite(_ t: String) -> Bool {
-        t.range(of: "hit your [^·\\n]{0,40}limit|usage limit reached", options: [.regularExpression, .caseInsensitive]) != nil
-    }
-
     private func limpiarPrompt(_ t: String) -> String {
         var s = t
         for patron in ["<[^>]+>[\\s\\S]*?</[^>]+>", "<[^>]+>", "\\s+"] {
@@ -281,10 +276,9 @@ final class Lector {
                     info.contexto = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
                     info.modelo = modelo
                 }
-                // El aviso de límite lo escribe Claude Code (mensaje sintético), no el modelo: si el agente solo
-                // habla de límites no cuenta.
-                let sintetico = m["model"] as? String == "<synthetic>" || d["isApiErrorMessage"] as? Bool == true
-                info.limitado = sintetico && esAvisoLimite(textoDe(content))
+                // El aviso de límite lo escribe Claude Code con el tipo de error marcado; el texto no se mira (un
+                // agente que habla de límites no cuenta, y la frase puede cambiar). Ejemplos en pruebas/limite/.
+                info.limitado = d["isApiErrorMessage"] as? Bool == true && d["error"] as? String == "rate_limit"
                 let stop = m["stop_reason"] as? String
                 if stop == "end_turn" || stop == "stop_sequence" { info.ultimo = "end_turn" } else if usaTool { info.ultimo = "tool_use" }
             } else if tipo == "user", d["isMeta"] as? Bool != true {
@@ -298,12 +292,8 @@ final class Lector {
                     else if !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { info.ultimo = "prompt"; info.limitado = false }
                 }
             } else if tipo == "system", d["subtype"] as? String == "api_error" {
+                // Es un reintento en curso: si se agotan, Claude Code escribe el aviso de arriba.
                 info.ultimo = "error"
-                // Solo el mensaje del error: el JSON trae `rateLimits` hasta en un corte de conexión.
-                if let e = d["error"], JSONSerialization.isValidJSONObject(e), let data = try? JSONSerialization.data(withJSONObject: e),
-                   esAvisoLimite(String(decoding: data.prefix(4000), as: UTF8.self)) {
-                    info.limitado = true
-                }
             }
         }
         // Del principio: la carpeta donde se abrió la sesión y el primer pedido, por si no hay título.
@@ -340,6 +330,12 @@ final class Lector {
         let info = analizar(ruta, size: size, previo: cache[ruta].map { ($0.size, $0.info.costo, $0.info.compactaciones) })
         cache[ruta] = (size, mtime, info)
         return info
+    }
+
+    // Para pruebas/limite.sh: lo que la app deduce de una transcripción suelta.
+    func diagnostico(_ ruta: String) -> [String: Any]? {
+        guard let info = infoTranscripcion(ruta) else { return nil }
+        return ["limitado": info.limitado, "ultimo": info.ultimo ?? NSNull()]
     }
 
     private func vivo(_ pid: Int) -> Bool {
@@ -924,6 +920,14 @@ if CommandLine.arguments.contains("--diag-terminal") {
 // Para diagnosticar sin abrir la ventana: imprime los agentes como JSON y sale.
 if CommandLine.arguments.contains("--json") {
     let data = (try? JSONEncoder().encode(Lector().leer())) ?? Data()
+    print(String(decoding: data, as: UTF8.self))
+    exit(0)
+}
+
+// --analizar <transcripción.jsonl>: imprime lo que se deduce de ese archivo como JSON y sale.
+if let i = CommandLine.arguments.firstIndex(of: "--analizar"), i + 1 < CommandLine.arguments.count {
+    guard let d = Lector().diagnostico(CommandLine.arguments[i + 1]),
+          let data = try? JSONSerialization.data(withJSONObject: d, options: .sortedKeys) else { exit(1) }
     print(String(decoding: data, as: UTF8.self))
     exit(0)
 }

@@ -43,6 +43,8 @@ ditto "build/Dungeon de agentes.app" "/Applications/Dungeon de agentes.app"
 - Registro de cada clic: `~/Library/Logs/DungeonDeAgentes.log`.
 - Qué agentes detecta, sin abrir la ventana:
   `"/Applications/Dungeon de agentes.app/Contents/MacOS/dungeon-de-agentes" --json`
+- Qué deduce de una transcripción suelta (lo usa `../pruebas/limite.sh`):
+  `"/Applications/Dungeon de agentes.app/Contents/MacOS/dungeon-de-agentes" --analizar <archivo.jsonl>`
 - Cómo ve la Terminal las ventanas y pestañas (lo escribe en el registro):
   `open -n "/Applications/Dungeon de agentes.app" --args --diag-terminal`
 

@@ -103,9 +103,6 @@ function ultimoCosto(file, size, previo) {
 // cuentan sobre el texto crudo: la primera vez en todo el archivo; después, solo en lo agregado.
 const MARCA_COMPACTACION = Buffer.from('"subtype":"compact_boundary"');
 
-// «You've hit your limit», «…your session limit», «…your org's monthly spend limit», «usage limit reached».
-const AVISO_LIMITE = /hit your [^·\n]{0,40}limit|usage limit reached/i;
-
 function contarCompactaciones(file, size, previo) {
   const solape = MARCA_COMPACTACION.length - 1; // para no perder una marca partida entre dos lecturas
   let desde = 0, n = 0;
@@ -158,10 +155,9 @@ function analizar(file, size, previo) {
         info.contexto = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
         info.modelo = m.model;
       }
-      // El aviso de límite lo escribe Claude Code (mensaje sintético), no el modelo: si el agente solo
-      // habla de límites no cuenta.
-      const sintetico = m.model === '<synthetic>' || d.isApiErrorMessage === true;
-      info.limitado = sintetico && AVISO_LIMITE.test(textoDe(content));
+      // El aviso de límite lo escribe Claude Code con el tipo de error marcado; el texto no se mira (un
+      // agente que habla de límites no cuenta, y la frase puede cambiar). Ejemplos en pruebas/limite/.
+      info.limitado = d.isApiErrorMessage === true && d.error === 'rate_limit';
       if (m.stop_reason === 'end_turn' || m.stop_reason === 'stop_sequence') info.ultimo = 'end_turn';
       else if (content.some(b => b.type === 'tool_use')) info.ultimo = 'tool_use';
     } else if (d.type === 'user' && !d.isMeta) {
@@ -175,9 +171,8 @@ function analizar(file, size, previo) {
         else if (t.trim()) { info.ultimo = 'prompt'; info.limitado = false; }
       }
     } else if (d.type === 'system' && d.subtype === 'api_error') {
+      // Es un reintento en curso: si se agotan, Claude Code escribe el aviso de arriba.
       info.ultimo = 'error';
-      // Solo el mensaje del error: el JSON trae `rateLimits` hasta en un corte de conexión.
-      if (AVISO_LIMITE.test(JSON.stringify(d.error || {}).slice(0, 4000))) info.limitado = true;
     }
   }
   const ini = inicio(file, size);
@@ -488,4 +483,4 @@ function leerSesiones(pineadas = []) {
   return out;
 }
 
-module.exports = { leerSesiones, costosDelHistorial, subagentesActivos, comandosDeFondoPorPid, contarCompactaciones };
+module.exports = { leerSesiones, costosDelHistorial, subagentesActivos, comandosDeFondoPorPid, contarCompactaciones, analizar };

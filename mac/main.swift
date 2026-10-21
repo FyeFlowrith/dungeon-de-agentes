@@ -26,10 +26,11 @@ struct Sesion: Encodable {
     let costo: Double?     // gasto de la sesión a precio de lista (cost-state de Claude Code)
     let contexto: Int?     // tokens cargados en la última respuesta
     let ventana: Int       // ventana de contexto de la sesión
+    let compactaciones: Int // veces que se compactó el contexto de la conversación
     let subagentes: Int    // subagentes trabajando ahora (el slime de la tarjeta)
     let esperandoSubagentes: Bool // Claude ya está libre y solo espera a sus subagentes
     var nivelGasto: Int? = nil // 0 bajo, 1 medio, 2 alto, comparado con el uso de la propia persona
-    var pineada = false    // pineada en alguna ventana de VS Code (pid 0: sin agente corriendo)
+    var pineada = false    // pineada en alguna ventana de VS Code (pid 0: pestaña sin agente corriendo)
 }
 
 final class Info {
@@ -41,6 +42,7 @@ final class Info {
     var costo: Double? = nil
     var contexto: Int? = nil
     var modelo = ""
+    var compactaciones = 0
 }
 
 final class Lector {
@@ -125,6 +127,32 @@ final class Lector {
             fin = ini
         }
         return nil
+    }
+
+    // Cada compactación del contexto deja en la transcripción una línea `"subtype":"compact_boundary"`. Se
+    // cuentan sobre los bytes crudos: la primera vez en todo el archivo; después, solo en lo agregado.
+    private let marcaCompactacion = Data("\"subtype\":\"compact_boundary\"".utf8)
+
+    private func contarCompactaciones(_ ruta: String, size: UInt64, previo: (size: UInt64, compactaciones: Int)?) -> Int {
+        let solape = UInt64(marcaCompactacion.count - 1) // para no perder una marca partida entre dos lecturas
+        var desde: UInt64 = 0, n = 0
+        if let previo, previo.size <= size { desde = previo.size > solape ? previo.size - solape : 0; n = previo.compactaciones }
+        guard let fh = FileHandle(forReadingAtPath: ruta) else { return n }
+        defer { try? fh.close() }
+        var ini = desde
+        while ini < size {
+            try? fh.seek(toOffset: ini)
+            let trozo = (try? fh.read(upToCount: Int(min(chunk + solape, size - ini)))) ?? Data()
+            if trozo.isEmpty { break }
+            // Una marca que empieza en el solape se cuenta en la lectura siguiente.
+            var rango = trozo.startIndex..<trozo.endIndex
+            while let r = trozo.range(of: marcaCompactacion, in: rango), r.lowerBound - trozo.startIndex < Int(chunk) {
+                n += 1
+                rango = r.lowerBound + 1..<trozo.endIndex
+            }
+            ini += chunk
+        }
+        return n
     }
 
     // ---------- Nivel de gasto: siempre comparado con el uso de la propia persona ----------
@@ -218,7 +246,7 @@ final class Lector {
         return 200_000
     }
 
-    private func analizar(_ ruta: String, size: UInt64, previo: (size: UInt64, costo: Double?)? = nil) -> Info {
+    private func analizar(_ ruta: String, size: UInt64, previo: (size: UInt64, costo: Double?, compactaciones: Int)? = nil) -> Info {
         let info = Info()
         let truncado = size > tailBytes
         let desde = size > tailBytes ? size - tailBytes : 0
@@ -280,7 +308,8 @@ final class Lector {
         }
         info.carpeta = carpeta.isEmpty ? info.cwd : carpeta
         info.titulo = [customTitle, agentName, aiTitle, prompt].first { !$0.isEmpty } ?? ""
-        if info.costo == nil { info.costo = ultimoCosto(ruta, size: size, previo: previo) }
+        if info.costo == nil { info.costo = ultimoCosto(ruta, size: size, previo: previo.map { ($0.size, $0.costo) }) }
+        info.compactaciones = contarCompactaciones(ruta, size: size, previo: previo.map { ($0.size, $0.compactaciones) })
         return info
     }
 
@@ -299,7 +328,7 @@ final class Lector {
               let size = (attr[.size] as? NSNumber)?.uint64Value,
               let mtime = (attr[.modificationDate] as? Date)?.timeIntervalSince1970 else { return nil }
         if let c = cache[ruta], c.size == size, c.mtime == mtime { return c.info }
-        let info = analizar(ruta, size: size, previo: cache[ruta].map { ($0.size, $0.info.costo) })
+        let info = analizar(ruta, size: size, previo: cache[ruta].map { ($0.size, $0.info.costo, $0.info.compactaciones) })
         cache[ruta] = (size, mtime, info)
         return info
     }
@@ -337,8 +366,8 @@ final class Lector {
         return ("unknown", status ?? "")
     }
 
-    /// Los agentes de Claude Code que están corriendo ahora, más las conversaciones pineadas en VS Code aunque
-    /// su agente no esté corriendo. Primero las pineadas; dentro de cada grupo, las que te necesitan.
+    /// Los agentes de Claude Code que están corriendo ahora, más las pestañas de Claude abiertas en VS Code
+    /// aunque su agente no esté corriendo. Primero las pineadas; dentro de cada grupo, las que te necesitan.
     func leer() -> [Sesion] {
         let ahora = Date().timeIntervalSince1970 * 1000
         guard let archivos = try? fm.contentsOfDirectory(atPath: sessions.path) else { return [] }
@@ -378,11 +407,11 @@ final class Lector {
                 estado: est, detalle: detalle, edadMs: ahora - ref, nacio: (p["startedAt"] as? Double) ?? 0,
                 heroe: heroe(sid), enVsCode: true,
                 pista: enVsCode ? "Clic para abrirla en VS Code" : "Clic para ir a su pestaña de la Terminal",
-                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info),
+                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info), compactaciones: info?.compactaciones ?? 0,
                 subagentes: sub, esperandoSubagentes: esperandoSubagentes))
         }
 
-        // Las conversaciones pineadas en VS Code, aunque su agente no esté corriendo (como en la extensión)
+        // Las pestañas de Claude abiertas en VS Code, aunque su agente no esté corriendo (como en la extensión)
         for pin in pineadasDeVsCode() {
             var id = pin.id
             if id == nil, !pin.carpeta.isEmpty {
@@ -397,7 +426,7 @@ final class Lector {
                 }
             }
             guard let id else { continue }
-            if let i = out.firstIndex(where: { $0.id == id }) { out[i].pineada = true; continue }
+            if let i = out.firstIndex(where: { $0.id == id }) { out[i].pineada = out[i].pineada || pin.pineada; continue }
             let transcripcion = buscarTranscripcion(id)
             let info = transcripcion.flatMap { infoTranscripcion($0) }
             let carpeta = pin.carpeta.isEmpty ? info?.carpeta ?? "" : pin.carpeta
@@ -406,9 +435,9 @@ final class Lector {
                 branch: info?.branch ?? "", repo: carpeta.isEmpty ? "" : (carpeta as NSString).lastPathComponent,
                 carpeta: carpeta, estado: "idle", detalle: "agente sin abrir: tocala para retomarla", edadMs: 0, nacio: 0,
                 heroe: heroe(id), enVsCode: true, pista: "Clic para abrirla en VS Code",
-                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info),
+                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info), compactaciones: info?.compactaciones ?? 0,
                 subagentes: 0, esperandoSubagentes: false)
-            t.pineada = true
+            t.pineada = pin.pineada
             vistos.insert(id)
             out.append(t)
         }
@@ -418,17 +447,19 @@ final class Lector {
         var ordenadas = out.sorted {
             if $0.pineada != $1.pineada { return $0.pineada }
             let (a, b) = (prioridad[$0.estado] ?? 9, prioridad[$1.estado] ?? 9)
-            return a != b ? a < b : $0.nacio > $1.nacio
+            if a != b { return a < b }
+            if $0.nacio != $1.nacio { return $0.nacio > $1.nacio }
+            return $0.titulo.compare($1.titulo, locale: Locale(identifier: "es")) == .orderedAscending
         }
         asignarNivelesDeGasto(&ordenadas)
         return ordenadas
     }
 
-    // Cada ventana de VS Code con la extensión publica sus pineadas en <globalStorage>/pineadas/<pid>.json
-    // (las de ventanas cerradas se ignoran; las borra la extensión).
-    private func pineadasDeVsCode() -> [(id: String?, titulo: String, carpeta: String)] {
+    // Cada ventana de VS Code con la extensión publica sus pestañas de Claude (con cuáles están pineadas) en
+    // <globalStorage>/pineadas/<pid>.json (las de ventanas cerradas se ignoran; las borra la extensión).
+    private func pineadasDeVsCode() -> [(id: String?, titulo: String, carpeta: String, pineada: Bool)] {
         let global = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Code/User/globalStorage")
-        var out: [(id: String?, titulo: String, carpeta: String)] = []
+        var out: [(id: String?, titulo: String, carpeta: String, pineada: Bool)] = []
         let dirs = ((try? fm.contentsOfDirectory(atPath: global.path)) ?? []).filter { $0.lowercased().hasSuffix(".dungeon-de-agentes") }
         for d in dirs {
             let dir = global.appendingPathComponent(d).appendingPathComponent("pineadas")
@@ -438,7 +469,8 @@ final class Lector {
                       let pid = p["pid"] as? Int, vivo(pid) else { continue }
                 let carpeta = p["carpeta"] as? String ?? ""
                 for s in p["sesiones"] as? [[String: Any]] ?? [] {
-                    out.append((s["id"] as? String, s["titulo"] as? String ?? "", carpeta))
+                    // Las versiones anteriores de la extensión publicaban solo las pineadas, sin este dato
+                    out.append((s["id"] as? String, s["titulo"] as? String ?? "", carpeta, s["pineada"] as? Bool ?? true))
                 }
             }
         }

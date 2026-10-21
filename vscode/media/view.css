@@ -98,6 +98,8 @@ canvas {
   font: 700 10px/1 ui-monospace, Menlo, monospace; color: #fff; letter-spacing: .04em;
   text-shadow: 0 1px 0 #140c08, 1px 0 0 #140c08, -1px 0 0 #140c08, 0 -1px 0 #140c08; }
 @keyframes titila { 50% { background: #7a2a22; } }
+/* Compactaciones del contexto, al lado del porcentaje */
+.hud .comp { margin-right: 5px; padding: 0 3px; border-radius: 2px; background: #140c08; color: #ffd36b; text-shadow: none; }
 
 /* Cartelito de precio sobre la pila de monedas (HTML encima del dibujo, siempre del mismo tamaño) */
 .cartel { position: absolute; transform: translate(-50%, -100%); pointer-events: none;

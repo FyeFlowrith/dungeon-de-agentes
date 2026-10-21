@@ -99,6 +99,29 @@ function ultimoCosto(file, size, previo) {
   return null;
 }
 
+// Cada compactación del contexto deja en la transcripción una línea `"subtype":"compact_boundary"`. Se
+// cuentan sobre el texto crudo: la primera vez en todo el archivo; después, solo en lo agregado.
+const MARCA_COMPACTACION = Buffer.from('"subtype":"compact_boundary"');
+
+function contarCompactaciones(file, size, previo) {
+  const solape = MARCA_COMPACTACION.length - 1; // para no perder una marca partida entre dos lecturas
+  let desde = 0, n = 0;
+  if (previo && previo.size <= size) { desde = Math.max(0, previo.size - solape); n = previo.compactaciones || 0; }
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(CHUNK + solape);
+    for (let ini = desde; ini < size; ini += CHUNK) {
+      const leidos = fs.readSync(fd, buf, 0, Math.min(buf.length, size - ini), ini);
+      const trozo = buf.subarray(0, leidos);
+      // Una marca que empieza en el solape se cuenta en la lectura siguiente.
+      for (let i = trozo.indexOf(MARCA_COMPACTACION); i !== -1 && i < CHUNK; i = trozo.indexOf(MARCA_COMPACTACION, i + 1)) n++;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return n;
+}
+
 function analizar(file, size, previo) {
   const truncado = size > TAIL_BYTES;
   const entries = lines(readSlice(file, Math.max(0, size - TAIL_BYTES), Math.min(size, TAIL_BYTES)), truncado);
@@ -155,6 +178,7 @@ function analizar(file, size, previo) {
   info.carpeta = ini.carpeta || info.cwd;
   info.titulo = customTitle || agentName || aiTitle || ini.prompt;
   if (info.costo === null) info.costo = ultimoCosto(file, size, previo && { size: previo.size, costo: previo.info.costo });
+  info.compactaciones = contarCompactaciones(file, size, previo && { size: previo.size, compactaciones: previo.info.compactaciones });
   return info;
 }
 
@@ -311,6 +335,7 @@ function tarjeta(id, proc, info, carpeta, estado, detalle, ahora) {
     costo: info && typeof info.costo === 'number' ? Math.round(info.costo * 100) / 100 : null,
     contexto: info && info.contexto ? info.contexto : null,
     ventana: info ? ventanaDe(info) : 200000,
+    compactaciones: info ? info.compactaciones || 0 : 0,
     subagentes: 0,
     esperandoSubagentes: false,
   };
@@ -381,8 +406,8 @@ function asignarNivelesDeGasto(sesiones) {
 }
 
 /**
- * Los agentes de Claude Code que están corriendo ahora, más las conversaciones pineadas aunque su
- * agente no esté corriendo. Primero las pineadas; dentro de cada grupo, las que te necesitan.
+ * Los agentes de Claude Code que están corriendo ahora, más las pestañas de Claude abiertas en VS Code
+ * aunque su agente no esté corriendo. Primero las pineadas; dentro de cada grupo, las que te necesitan.
  */
 function leerSesiones(pineadas = []) {
   let comandosFondo = null; // se consulta una vez por lectura, solo si hace falta
@@ -436,23 +461,25 @@ function leerSesiones(pineadas = []) {
     }
     if (!id) continue;
     const ya = out.find(s => s.id === id);
-    if (ya) { ya.pineada = true; continue; }
-    // Pineada sin agente corriendo (por ejemplo, después de recargar la ventana): igual se muestra.
+    const pineada = p.pineada !== false; // las versiones anteriores publicaban solo las pineadas
+    if (ya) { ya.pineada = ya.pineada || pineada; continue; }
+    // Pestaña sin agente corriendo (por ejemplo, después de reabrir VS Code): igual se muestra.
     const file = buscarTranscripcion(id);
     let info = null;
     try { info = file ? infoTranscripcion(file) : null; } catch { info = null; }
     const t = tarjeta(id, null, info, p.carpeta || (info && info.carpeta) || '', 'idle', 'agente sin abrir: tocala para retomarla', ahora);
     if (!info || !info.titulo) t.titulo = p.titulo;
-    t.pineada = true;
+    t.pineada = pineada;
     vistos.add(id);
     out.push(t);
   }
 
   const usados = new Set([...vistos].map(id => rutaTranscripcion.get(id)));
   for (const k of cache.keys()) if (!usados.has(k)) cache.delete(k);
-  out.sort((a, b) => (b.pineada - a.pineada) || (PRIORIDAD[a.estado] - PRIORIDAD[b.estado]) || (b.nacio - a.nacio));
+  out.sort((a, b) => (b.pineada - a.pineada) || (PRIORIDAD[a.estado] - PRIORIDAD[b.estado]) || (b.nacio - a.nacio) ||
+    a.titulo.localeCompare(b.titulo, 'es'));
   asignarNivelesDeGasto(out);
   return out;
 }
 
-module.exports = { leerSesiones, costosDelHistorial, subagentesActivos, comandosDeFondoPorPid };
+module.exports = { leerSesiones, costosDelHistorial, subagentesActivos, comandosDeFondoPorPid, contarCompactaciones };

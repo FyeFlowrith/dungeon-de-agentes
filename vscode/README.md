@@ -8,7 +8,7 @@ que cambia según lo que está haciendo. Aparece con el ícono del personajito e
 | TRABAJANDO | Claude informa `busy`; o está libre (`idle` / `shell`) pero tiene subagentes o comandos corriendo en segundo plano |
 | TE NECESITA | Claude informa `waiting`, o te hizo una pregunta / espera que apruebes un plan |
 | TERMINÓ | Claude informa `idle` desde hace menos de 20 min |
-| EN PAUSA | `idle` desde hace más de 20 min, o pestaña pineada sin agente corriendo |
+| EN PAUSA | `idle` desde hace más de 20 min, o pestaña de Claude abierta sin agente corriendo |
 | SIN CUOTA | Llegó al límite de uso |
 
 Cada tarjeta suma el **slime** del agente (sus subagentes: duerme sin ninguno, trabaja con un globito que
@@ -25,15 +25,15 @@ aparecen todos los datos. Qué es cada cosa y de dónde sale: en el [README prin
 - Si el agente corre en la **Terminal** (o iTerm2), el clic te lleva a su pestaña. La primera vez macOS
   pide que Visual Studio Code pueda controlar la Terminal y que tenga permiso de **Accesibilidad** (la
   Terminal solo deja cambiar de pestaña desde su menú Ventana). Lógica en `terminal.js`.
-- Requisitos: la extensión de **Claude Code** para VS Code, y macOS o Linux (en Windows las pineadas no
-  se reconocen: se leen con `sqlite3`).
+- Requisitos: la extensión de **Claude Code** para VS Code, y macOS o Linux (en Windows las pestañas sin
+  agente no se reconocen: se leen con `sqlite3`).
 
 ## Cómo está armada
 
 | Archivo | Qué hace |
 | --- | --- |
 | `package.json` | Declara la vista lateral (`dungeonAgentes.view`). |
-| `extension.js` | Arranca la vista, refresca cada 2 s, abre sesiones (también en otra ventana, vía `abrir-sesion.json` en el `globalStorage`), y publica las pestañas pineadas de cada ventana (`pineadas/<pid>.json`). |
+| `extension.js` | Arranca la vista, refresca cada 2 s, abre sesiones (también en otra ventana, vía `abrir-sesion.json` en el `globalStorage`), y publica las pestañas de Claude de cada ventana, con cuáles están pineadas (`pineadas/<pid>.json`). |
 | `sesiones.js` | Lee los agentes vivos de `~/.claude/sessions/<pid>.json` (estado que publica Claude Code) y de su transcripción (`~/.claude/projects/*/<sessionId>.jsonl`) el título, la rama, la herramienta en uso, el contexto y el gasto; calcula el nivel del gasto (comparado con las otras sesiones o con el historial de 2 semanas). No depende de VS Code: se puede probar con Node. |
 | `terminal.js` | Lleva a la pestaña de Terminal o iTerm2 donde corre un agente. |
 | `media/view.js`, `media/view.css` | Dibujan las tarjetas (canvas): cuarto, héroe, slime, pila de monedas, cartelito, franja de contexto, buscador y la ayuda al pasar el mouse. La app de macOS usa una copia (`../mac/web/`). |
@@ -48,7 +48,7 @@ aparecen todos los datos. Qué es cada cosa y de dónde sale: en el [README prin
 - **Ver qué agentes detecta y en qué estado**, sin VS Code (desde esta carpeta, con Node 18 o más):
 
   ```bash
-  node -e 'for (const s of require("./sesiones").leerSesiones()) console.log(s.estado, "|", s.titulo, "|", s.costo, s.nivelGasto, "|", s.contexto, "/", s.ventana, "| subagentes:", s.subagentes, s.esperandoSubagentes ? "(los espera)" : "")'
+  node -e 'for (const s of require("./sesiones").leerSesiones()) console.log(s.estado, "|", s.titulo, "|", s.costo, s.nivelGasto, "|", s.contexto, "/", s.ventana, "| compactaciones:", s.compactaciones, "| subagentes:", s.subagentes, s.esperandoSubagentes ? "(los espera)" : "")'
   ```
 
 - Después de instalar una versión nueva, recargá **cada** ventana de VS Code (Cmd+Shift+P → «Developer:

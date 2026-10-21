@@ -13,8 +13,9 @@ App nativa (Swift + WebKit, sin Chrome ni Node) para quien usa Claude Code en la
 - Clic en una tarjeta: si el agente corre en Terminal o iTerm2, va a su pestaña; si corre en VS Code,
   abre VS Code en la ventana y la pestaña de esa conversación (con la extensión de `../vscode` instalada;
   sin ella, usa el link de la extensión de Claude).
-- Con la extensión de `../vscode` instalada, también muestra arriba las conversaciones **pineadas** en VS Code,
-  aunque su agente no esté corriendo (las mismas tarjetas que ves en VS Code; clic para retomarla allá).
+- Con la extensión de `../vscode` instalada, también muestra todas las pestañas de Claude abiertas en VS Code
+  (pineadas primero), aunque su agente no esté corriendo: las mismas tarjetas que ves en VS Code; clic para
+  retomarla allá.
 
 ## Armar e instalar
 

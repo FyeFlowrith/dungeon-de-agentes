@@ -41,8 +41,8 @@ class DungeonView {
     const dir = context.globalStorageUri.fsPath;
     fs.mkdirSync(dir, { recursive: true });
     this.pendiente = path.join(dir, 'abrir-sesion.json');
-    // Cada ventana publica acá las conversaciones de Claude que tiene pineadas (<pid>.json), para que
-    // el dungeon de cualquier ventana las muestre todas.
+    // Cada ventana publica acá sus pestañas de Claude, con cuáles están pineadas (<pid>.json), para que
+    // el dungeon de cualquier ventana (y la app de macOS) las muestre todas.
     this.dirPineadas = path.join(dir, 'pineadas');
     fs.mkdirSync(this.dirPineadas, { recursive: true });
     this.archivoPineadas = path.join(this.dirPineadas, `${process.pid}.json`);
@@ -62,21 +62,23 @@ class DungeonView {
     });
   }
 
+  // Publica todas las pestañas de Claude de esta ventana (también las que todavía no arrancaron su
+  // agente, por ejemplo después de reabrir VS Code), marcando cuáles están pineadas.
   async actualizarPineadas() {
-    const titulos = [];
+    const pestanias = [];
     for (const grupo of vscode.window.tabGroups.all) {
       for (const tab of grupo.tabs) {
-        if (tab.isPinned && tab.input instanceof vscode.TabInputWebview && /claudeVSCodePanel/.test(tab.input.viewType)) {
-          titulos.push(tab.label);
+        if (tab.input instanceof vscode.TabInputWebview && /claudeVSCodePanel/.test(tab.input.viewType)) {
+          pestanias.push({ titulo: tab.label, pineada: tab.isPinned });
         }
       }
     }
     const sesiones = [];
-    if (titulos.length) {
+    if (pestanias.length) {
       const conocidas = await this.pestaniasDeClaude();
-      for (const titulo of titulos) {
+      for (const { titulo, pineada } of pestanias) {
         const s = conocidas.find(c => mismoTitulo(c.title, titulo));
-        sesiones.push({ id: s ? s.sessionId : null, titulo });
+        sesiones.push({ id: s ? s.sessionId : null, titulo, pineada });
       }
     }
     const carpeta = carpetasDeEstaVentana()[0] || '';
@@ -90,7 +92,7 @@ class DungeonView {
     this.refrescar();
   }
 
-  // Las pineadas de todas las ventanas abiertas (las de ventanas cerradas se descartan).
+  // Las pestañas de Claude de todas las ventanas abiertas (las de ventanas cerradas se descartan).
   leerPineadas() {
     const out = [];
     let archivos = [];

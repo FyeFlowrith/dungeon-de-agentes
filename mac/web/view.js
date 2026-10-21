@@ -56,7 +56,7 @@
     el.className = 'card';
     el.tabIndex = 0;
     el.setAttribute('role', 'button');
-    el.innerHTML = '<div class="hud" hidden><span class="lleno"></span><span class="txt"><span>CONTEXTO</span><span class="pct"></span></span></div>' +
+    el.innerHTML = '<div class="hud" hidden><span class="lleno"></span><span class="txt"><span>CONTEXTO</span><span><b class="comp" hidden></b><span class="pct"></span></span></span></div>' +
       '<canvas></canvas><div class="globo" hidden></div><div class="cartel" hidden><span class="moneda">≈ u$s</span><span class="monto"></span></div>' +
       '<div class="pie"><div class="titulo"></div>' +
       '<div class="linea"><span class="rama"></span><span class="estado"></span></div></div>';
@@ -96,6 +96,10 @@
       hud.className = 'hud' + (pct > 0.9 ? ' alto' : pct > 0.7 ? ' medio' : '');
       hud.querySelector('.lleno').style.width = `${Math.round(pct * 100)}%`;
       hud.querySelector('.pct').textContent = `${Math.round(pct * 100)} %`;
+      // Cuántas veces se compactó la conversación (sin marca si nunca)
+      const comp = hud.querySelector('.comp');
+      comp.hidden = !s.compactaciones;
+      comp.textContent = s.compactaciones ? `↻${s.compactaciones}` : '';
     }
     const datos = [];
     if (typeof s.costo === 'number') {
@@ -332,11 +336,12 @@
     t.slimeCabeza = null;
     if (nSub > 0 && s.esperandoSubagentes) {
       // El agente ya terminó lo suyo y solo espera a sus subagentes: de brazos cruzados, con un reloj de
-      // arena sobre la cabeza, mirando al slime que trabaja junto al escritorio.
+      // arena sobre la cabeza, mirando al slime que trabaja junto al escritorio. Va en el centro: a la
+      // izquierda está la pila de monedas con el cartel del gasto.
       if (img.workingFront.complete) ctx.drawImage(img.workingFront, 0, 0, RW, RH);
-      t.slimeCabeza = slimeSaltando(ctx, color, 84, 70, now, 650, 6);
-      heroeDeBrazosCruzados(ctx, h, 30, PISO, false);
-      relojDeArena(ctx, 30 + HU / 2, PISO + 2 - (reducido ? 0 : Math.abs(Math.sin(now / 600)) * 1.2), now);
+      t.slimeCabeza = slimeSaltando(ctx, color, 101, 72, now, 650, 6);
+      heroeDeBrazosCruzados(ctx, h, CX, PISO, false);
+      relojDeArena(ctx, CX + HU / 2, PISO + 2 - (reducido ? 0 : Math.abs(Math.sin(now / 600)) * 1.2), now);
       return;
     }
     switch (s.estado) {

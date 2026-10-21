@@ -19,13 +19,40 @@ body {
   color: var(--texto);
 }
 
-#lista { display: flex; flex-direction: column; gap: 10px; }
+/* Buscador fijo arriba de todo */
+#buscar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -8px -8px 10px;
+  padding: 8px 8px 6px;
+  background: var(--vscode-sideBar-background, #1e1a17);
+}
+#q {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 2px solid var(--borde);
+  border-radius: 6px;
+  background: var(--fondo-texto);
+  color: var(--texto);
+  font: 12px ui-monospace, Menlo, monospace;
+  outline: none;
+}
+#q::placeholder { color: var(--texto-suave); }
+#q:focus { border-color: #a07a3a; }
+
+/* Tarjetas de tamaño fijo: si la barra es ancha, se ponen una al lado de la otra; si es angosta, se achican */
+#lista { display: flex; flex-direction: row; flex-wrap: wrap; gap: 10px; }
 
 #vacio { color: var(--vscode-descriptionForeground); font-size: 12px; text-align: center; margin-top: 24px; }
 
 .card {
   display: block;
-  width: 100%;
+  width: 220px;
+  max-width: 100%;
+  flex: none;
   padding: 0;
   border: 2px solid var(--borde);
   border-radius: 6px;
@@ -63,6 +90,27 @@ canvas {
 
 .pie { flex: none; padding: 5px 8px 6px; }
 
+/* Contexto usado: franja arriba de la tarjeta, por fuera del cuarto (azul, ámbar desde 70 %, roja desde 90 %) */
+.hud { flex: none; position: relative; height: 16px; background: #2b2622; border-bottom: 2px solid var(--borde); overflow: hidden; }
+.hud .lleno { position: absolute; inset: 0 auto 0 0; background: #5aa9ff; box-shadow: inset 0 3px 0 rgba(255, 255, 255, .3); }
+.hud.medio .lleno { background: #e8a33a; }
+.hud.alto .lleno { background: #e05a4a; animation: titila .8s steps(2) infinite; }
+.hud .txt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 6px;
+  font: 700 10px/1 ui-monospace, Menlo, monospace; color: #fff; letter-spacing: .04em;
+  text-shadow: 0 1px 0 #140c08, 1px 0 0 #140c08, -1px 0 0 #140c08, 0 -1px 0 #140c08; }
+@keyframes titila { 50% { background: #7a2a22; } }
+
+/* Cartelito de precio sobre la pila de monedas (HTML encima del dibujo, siempre del mismo tamaño) */
+.cartel { position: absolute; transform: translate(-50%, -100%); pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 4px 2px;
+  background: #f3e2b8; border: 2px solid #140c08; border-radius: 2px; box-shadow: 0 2px 0 rgba(20, 12, 8, .45);
+  font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: #3a2412; line-height: 1; white-space: nowrap; }
+.cartel .moneda { font-size: 8px; letter-spacing: .03em; }
+.cartel .monto { font-size: 8px; }
+.cartel[data-nivel="1"] { color: #8a4f00; }
+.cartel[data-nivel="2"] { color: #b3231a; }
+@media (prefers-reduced-motion: reduce) { .hud.alto .lleno { animation: none; } }
+
 .titulo {
   font-size: 12px;
   line-height: 1.35;
@@ -94,3 +142,8 @@ canvas {
 @media (prefers-reduced-motion: reduce) {
   .card[data-estado="blocked"] { animation: none; }
 }
+
+/* Ayuda al pasar el mouse sobre una tarjeta */
+.tip { position: fixed; z-index: 50; max-width: 280px; padding: 7px 9px; border: 1px solid #6b4e36; border-radius: 6px;
+  background: #17110d; color: #f3e6d0; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre-line;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45); pointer-events: none; }

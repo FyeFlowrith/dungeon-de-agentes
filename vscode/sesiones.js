@@ -70,7 +70,36 @@ function inicio(file, size) {
   return { carpeta, prompt };
 }
 
-function analizar(file, size) {
+// Modelos con ventana de contexto de 1 millón de tokens (los demás, 200 mil, salvo que se vea que la
+// sesión ya pasó ese número).
+const MODELOS_1M = new Set(['claude-opus-5-5', 'claude-fable-5-1']);
+const CHUNK = 1024 * 1024;
+
+// El costo de la sesión (`cost-state`) lo anota Claude Code de a ratos y puede no estar en el final del
+// archivo: la primera vez se busca hacia atrás; después, solo en lo que se agregó desde la lectura anterior.
+function costoDe(text) {
+  let costo = null;
+  for (const l of text.split('\n')) {
+    if (!l.includes('"cost-state"')) continue;
+    try { const d = JSON.parse(l); if (typeof d.totalCostUSD === 'number') costo = d.totalCostUSD; } catch { /* cortada */ }
+  }
+  return costo;
+}
+
+function ultimoCosto(file, size, previo) {
+  if (previo && previo.size <= size) {
+    const nuevo = costoDe(readSlice(file, previo.size, Math.min(size - previo.size, 8 * CHUNK)));
+    return nuevo !== null ? nuevo : previo.costo;
+  }
+  for (let fin = size; fin > 0; fin -= CHUNK) {
+    const ini = Math.max(0, fin - CHUNK - 64 * 1024); // con solapamiento, para no cortar una línea
+    const c = costoDe(readSlice(file, ini, fin - ini));
+    if (c !== null) return c;
+  }
+  return null;
+}
+
+function analizar(file, size, previo) {
   const truncado = size > TAIL_BYTES;
   const entries = lines(readSlice(file, Math.max(0, size - TAIL_BYTES), Math.min(size, TAIL_BYTES)), truncado);
   const info = {
@@ -78,9 +107,11 @@ function analizar(file, size) {
     ultimo: null, // 'prompt' | 'tool_result' | 'tool_use' | 'end_turn' | 'interrumpido' | 'error'
     pendientes: new Map(), // tool_use id -> nombre
     ultimaTool: '', limitado: false, hayAssistant: false,
+    costo: null, contexto: null, modelo: '',
   };
   let customTitle = '', aiTitle = '', agentName = '';
   for (const d of entries) {
+    if (d.type === 'cost-state' && typeof d.totalCostUSD === 'number') info.costo = d.totalCostUSD;
     if (d.customTitle) customTitle = d.customTitle;
     if (d.aiTitle) aiTitle = d.aiTitle;
     if (d.agentName) agentName = d.agentName;
@@ -94,6 +125,12 @@ function analizar(file, size) {
       const content = Array.isArray(m.content) ? m.content : [];
       for (const b of content) {
         if (b.type === 'tool_use') { info.pendientes.set(b.id, b.name); info.ultimaTool = b.name; }
+      }
+      // Contexto usado = lo que el modelo tenía cargado en esta respuesta (nuevo + guardado de antes).
+      const u = m.usage;
+      if (u && m.model && m.model !== '<synthetic>') {
+        info.contexto = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+        info.modelo = m.model;
       }
       const txt = textoDe(content);
       info.limitado = /hit your (session|usage|weekly)? ?limit|usage limit reached/i.test(txt);
@@ -117,7 +154,14 @@ function analizar(file, size) {
   const ini = inicio(file, size);
   info.carpeta = ini.carpeta || info.cwd;
   info.titulo = customTitle || agentName || aiTitle || ini.prompt;
+  if (info.costo === null) info.costo = ultimoCosto(file, size, previo && { size: previo.size, costo: previo.info.costo });
   return info;
+}
+
+// Ventana de contexto de la sesión, en tokens.
+function ventanaDe(info) {
+  if (MODELOS_1M.has(info.modelo) || /\[1m\]/i.test(info.modelo) || (info.contexto || 0) > 200000) return 1000000;
+  return 200000;
 }
 
 function hash(s) {
@@ -149,7 +193,7 @@ function infoTranscripcion(file) {
   try { st = fs.statSync(file); } catch { return null; }
   let c = cache.get(file);
   if (!c || c.size !== st.size || c.mtimeMs !== st.mtimeMs) {
-    c = { size: st.size, mtimeMs: st.mtimeMs, info: analizar(file, st.size) };
+    c = { size: st.size, mtimeMs: st.mtimeMs, info: analizar(file, st.size, c) };
     cache.set(file, c);
   }
   return c.info;
@@ -225,7 +269,74 @@ function tarjeta(id, proc, info, carpeta, estado, detalle, ahora) {
     heroe: hash(id) % 6,
     enVsCode: proc ? proc.entrypoint === 'claude-vscode' : true,
     pineada: false,
+    costo: info && typeof info.costo === 'number' ? Math.round(info.costo * 100) / 100 : null,
+    contexto: info && info.contexto ? info.contexto : null,
+    ventana: info ? ventanaDe(info) : 200000,
   };
+}
+
+// ---------- Nivel de gasto: siempre comparado con el uso de la propia persona ----------
+// Con 3 o más sesiones abiertas con gasto, se comparan entre sí (tercios). Con menos, contra las sesiones
+// de la persona en las últimas 2 semanas (en qué tercio de su historial cae). Sin historial, sin nivel.
+const HISTORIAL_DIAS = 14;
+const HISTORIAL_CADA_MS = 60 * 60 * 1000;
+const HISTORIAL_MAX_BYTES = 4 * CHUNK; // por archivo: el costo suele estar cerca del final
+const costoHistorial = new Map(); // ruta -> { size, mtimeMs, costo }
+let historial = { calculado: 0, costos: [] };
+
+function costoDesdeElFinal(file, size) {
+  for (let fin = size, leidos = 0; fin > 0 && leidos < HISTORIAL_MAX_BYTES; fin -= CHUNK, leidos += CHUNK) {
+    const ini = Math.max(0, fin - CHUNK - 64 * 1024);
+    const c = costoDe(readSlice(file, ini, fin - ini));
+    if (c !== null) return c;
+  }
+  return null;
+}
+
+function costosDelHistorial() {
+  const ahora = Date.now();
+  if (ahora - historial.calculado < HISTORIAL_CADA_MS) return historial.costos;
+  const costos = [], vistos = new Set();
+  let dirs = [];
+  try { dirs = fs.readdirSync(PROJECTS); } catch { dirs = []; }
+  for (const d of dirs) {
+    let files = [];
+    try { files = fs.readdirSync(path.join(PROJECTS, d)).filter(f => f.endsWith('.jsonl')); } catch { continue; }
+    for (const f of files) {
+      const file = path.join(PROJECTS, d, f);
+      let st;
+      try { st = fs.statSync(file); } catch { continue; }
+      if (ahora - st.mtimeMs > HISTORIAL_DIAS * 86400000) continue;
+      vistos.add(file);
+      let c = costoHistorial.get(file);
+      if (!c || c.size !== st.size || c.mtimeMs !== st.mtimeMs) {
+        let costo = null;
+        try { costo = costoDesdeElFinal(file, st.size); } catch { costo = null; }
+        c = { size: st.size, mtimeMs: st.mtimeMs, costo };
+        costoHistorial.set(file, c);
+      }
+      if (typeof c.costo === 'number' && c.costo >= 0.01) costos.push(c.costo);
+    }
+  }
+  for (const k of costoHistorial.keys()) if (!vistos.has(k)) costoHistorial.delete(k);
+  historial = { calculado: ahora, costos };
+  return costos;
+}
+
+function asignarNivelesDeGasto(sesiones) {
+  const conGasto = sesiones.filter(s => typeof s.costo === 'number' && s.costo >= 0.01);
+  for (const s of sesiones) s.nivelGasto = null;
+  if (conGasto.length >= 3) {
+    const orden = [...conGasto].sort((a, b) => a.costo - b.costo);
+    orden.forEach((s, i) => { s.nivelGasto = Math.min(2, Math.floor(i * 3 / orden.length)); });
+    return;
+  }
+  const hist = costosDelHistorial();
+  if (hist.length < 3) return;
+  for (const s of conGasto) {
+    const debajo = hist.filter(c => c < s.costo).length / hist.length;
+    s.nivelGasto = debajo < 1 / 3 ? 0 : debajo < 2 / 3 ? 1 : 2;
+  }
 }
 
 /**
@@ -282,7 +393,8 @@ function leerSesiones(pineadas = []) {
   const usados = new Set([...vistos].map(id => rutaTranscripcion.get(id)));
   for (const k of cache.keys()) if (!usados.has(k)) cache.delete(k);
   out.sort((a, b) => (b.pineada - a.pineada) || (PRIORIDAD[a.estado] - PRIORIDAD[b.estado]) || (b.nacio - a.nacio));
+  asignarNivelesDeGasto(out);
   return out;
 }
 
-module.exports = { leerSesiones };
+module.exports = { leerSesiones, costosDelHistorial };

@@ -23,6 +23,10 @@ struct Sesion: Encodable {
     let heroe: Int
     let enVsCode: Bool
     let pista: String
+    let costo: Double?     // gasto de la sesión a precio de lista (cost-state de Claude Code)
+    let contexto: Int?     // tokens cargados en la última respuesta
+    let ventana: Int       // ventana de contexto de la sesión
+    var nivelGasto: Int? = nil // 0 bajo, 1 medio, 2 alto, comparado con el uso de la propia persona
 }
 
 final class Info {
@@ -31,6 +35,9 @@ final class Info {
     var pendientes: [(id: String, nombre: String)] = []
     var limitado = false
     var hayAssistant = false
+    var costo: Double? = nil
+    var contexto: Int? = nil
+    var modelo = ""
 }
 
 final class Lector {
@@ -88,12 +95,104 @@ final class Lector {
         return s.trimmingCharacters(in: .whitespaces)
     }
 
-    private func analizar(_ ruta: String, size: UInt64) -> Info {
+    // Modelos con ventana de 1 millón de tokens (los demás, 200 mil, salvo que la sesión ya haya pasado ese número).
+    private let modelos1M: Set<String> = ["claude-opus-5-5", "claude-fable-5-1"]
+    private let chunk: UInt64 = 1024 * 1024
+
+    private func costoDe(_ texto: String) -> Double? {
+        var costo: Double? = nil
+        for l in texto.split(separator: "\n") where l.contains("\"cost-state\"") {
+            if let d = (try? JSONSerialization.jsonObject(with: Data(l.utf8))) as? [String: Any],
+               let c = (d["totalCostUSD"] as? NSNumber)?.doubleValue { costo = c }
+        }
+        return costo
+    }
+
+    // El costo lo anota Claude Code de a ratos y puede no estar en el final del archivo: la primera vez se
+    // busca hacia atrás; después, solo en lo que se agregó desde la lectura anterior.
+    private func ultimoCosto(_ ruta: String, size: UInt64, previo: (size: UInt64, costo: Double?)?) -> Double? {
+        if let previo, previo.size <= size {
+            return costoDe(leerTrozo(ruta, desde: previo.size, largo: min(size - previo.size, 8 * chunk))) ?? previo.costo
+        }
+        var fin = size
+        while fin > 0 {
+            let ini = fin > chunk + 65536 ? fin - chunk - 65536 : 0
+            if let c = costoDe(leerTrozo(ruta, desde: ini, largo: fin - ini)) { return c }
+            fin = ini
+        }
+        return nil
+    }
+
+    // ---------- Nivel de gasto: siempre comparado con el uso de la propia persona ----------
+    // Con 3 o más sesiones abiertas con gasto, se comparan entre sí (tercios). Con menos, contra las sesiones
+    // de la persona en las últimas 2 semanas. Sin historial, sin nivel. El historial se recalcula cada hora.
+    private var costoHistorial: [String: (size: UInt64, mtime: Double, costo: Double?)] = [:]
+    private var historial: (calculado: Double, costos: [Double]) = (0, [])
+
+    private func costoDesdeElFinal(_ ruta: String, size: UInt64) -> Double? {
+        var fin = size, leidos: UInt64 = 0
+        while fin > 0 && leidos < 4 * chunk {
+            let ini = fin > chunk + 65536 ? fin - chunk - 65536 : 0
+            if let c = costoDe(leerTrozo(ruta, desde: ini, largo: fin - ini)) { return c }
+            fin = ini; leidos += chunk
+        }
+        return nil
+    }
+
+    func costosDelHistorial() -> [Double] {
+        let ahora = Date().timeIntervalSince1970 * 1000
+        if ahora - historial.calculado < 3_600_000 { return historial.costos }
+        var costos: [Double] = [], vistos = Set<String>()
+        for d in (try? fm.contentsOfDirectory(atPath: projects.path)) ?? [] {
+            let dir = projects.appendingPathComponent(d)
+            for f in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where f.hasSuffix(".jsonl") {
+                let ruta = dir.appendingPathComponent(f).path
+                guard let attr = try? fm.attributesOfItem(atPath: ruta),
+                      let size = (attr[.size] as? NSNumber)?.uint64Value,
+                      let mtime = (attr[.modificationDate] as? Date)?.timeIntervalSince1970 else { continue }
+                if ahora - mtime * 1000 > 14 * 86_400_000 { continue }
+                vistos.insert(ruta)
+                var c = costoHistorial[ruta]
+                if c == nil || c!.size != size || c!.mtime != mtime {
+                    c = (size, mtime, costoDesdeElFinal(ruta, size: size))
+                    costoHistorial[ruta] = c
+                }
+                if let costo = c!.costo, costo >= 0.01 { costos.append(costo) }
+            }
+        }
+        for k in costoHistorial.keys where !vistos.contains(k) { costoHistorial.removeValue(forKey: k) }
+        historial = (ahora, costos)
+        return costos
+    }
+
+    private func asignarNivelesDeGasto(_ sesiones: inout [Sesion]) {
+        let conGasto = sesiones.indices.filter { (sesiones[$0].costo ?? 0) >= 0.01 }
+        if conGasto.count >= 3 {
+            let orden = conGasto.sorted { sesiones[$0].costo! < sesiones[$1].costo! }
+            for (i, idx) in orden.enumerated() { sesiones[idx].nivelGasto = min(2, i * 3 / orden.count) }
+            return
+        }
+        let hist = costosDelHistorial()
+        guard hist.count >= 3 else { return }
+        for idx in conGasto {
+            let debajo = Double(hist.filter { $0 < sesiones[idx].costo! }.count) / Double(hist.count)
+            sesiones[idx].nivelGasto = debajo < 1.0 / 3 ? 0 : debajo < 2.0 / 3 ? 1 : 2
+        }
+    }
+
+    func ventana(_ info: Info?) -> Int {
+        guard let info else { return 200_000 }
+        if modelos1M.contains(info.modelo) || info.modelo.lowercased().contains("[1m]") || (info.contexto ?? 0) > 200_000 { return 1_000_000 }
+        return 200_000
+    }
+
+    private func analizar(_ ruta: String, size: UInt64, previo: (size: UInt64, costo: Double?)? = nil) -> Info {
         let info = Info()
         let truncado = size > tailBytes
         let desde = size > tailBytes ? size - tailBytes : 0
         var customTitle = "", aiTitle = "", agentName = ""
         for d in lineas(leerTrozo(ruta, desde: desde, largo: min(size, tailBytes)), descartarPrimera: truncado) {
+            if d["type"] as? String == "cost-state", let c = (d["totalCostUSD"] as? NSNumber)?.doubleValue { info.costo = c }
             if let v = d["customTitle"] as? String, !v.isEmpty { customTitle = v }
             if let v = d["aiTitle"] as? String, !v.isEmpty { aiTitle = v }
             if let v = d["agentName"] as? String, !v.isEmpty { agentName = v }
@@ -110,6 +209,12 @@ final class Lector {
                 for b in content where b["type"] as? String == "tool_use" {
                     usaTool = true
                     info.pendientes.append((b["id"] as? String ?? "", b["name"] as? String ?? ""))
+                }
+                // Contexto usado = lo que el modelo tenía cargado en esta respuesta (nuevo + guardado de antes).
+                if let u = m["usage"] as? [String: Any], let modelo = m["model"] as? String, modelo != "<synthetic>" {
+                    let n = { (k: String) in (u[k] as? NSNumber)?.intValue ?? 0 }
+                    info.contexto = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
+                    info.modelo = modelo
                 }
                 let txt = textoDe(content)
                 info.limitado = txt.range(of: "hit your (session|usage|weekly)? ?limit|usage limit reached", options: [.regularExpression, .caseInsensitive]) != nil
@@ -143,6 +248,7 @@ final class Lector {
         }
         info.carpeta = carpeta.isEmpty ? info.cwd : carpeta
         info.titulo = [customTitle, agentName, aiTitle, prompt].first { !$0.isEmpty } ?? ""
+        if info.costo == nil { info.costo = ultimoCosto(ruta, size: size, previo: previo) }
         return info
     }
 
@@ -161,7 +267,7 @@ final class Lector {
               let size = (attr[.size] as? NSNumber)?.uint64Value,
               let mtime = (attr[.modificationDate] as? Date)?.timeIntervalSince1970 else { return nil }
         if let c = cache[ruta], c.size == size, c.mtime == mtime { return c.info }
-        let info = analizar(ruta, size: size)
+        let info = analizar(ruta, size: size, previo: cache[ruta].map { ($0.size, $0.info.costo) })
         cache[ruta] = (size, mtime, info)
         return info
     }
@@ -222,14 +328,17 @@ final class Lector {
                 repo: carpeta.isEmpty ? "" : (carpeta as NSString).lastPathComponent, carpeta: carpeta,
                 estado: est, detalle: detalle, edadMs: ahora - ref, nacio: (p["startedAt"] as? Double) ?? 0,
                 heroe: heroe(sid), enVsCode: true,
-                pista: enVsCode ? "Clic para abrirla en VS Code" : "Clic para ir a su pestaña de la Terminal"))
+                pista: enVsCode ? "Clic para abrirla en VS Code" : "Clic para ir a su pestaña de la Terminal",
+                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info)))
         }
         let usados = Set(vistos.compactMap { rutas[$0] })
         for k in cache.keys where !usados.contains(k) { cache.removeValue(forKey: k) }
-        return out.sorted {
+        var ordenadas = out.sorted {
             let (a, b) = (prioridad[$0.estado] ?? 9, prioridad[$1.estado] ?? 9)
             return a != b ? a < b : $0.nacio > $1.nacio
         }
+        asignarNivelesDeGasto(&ordenadas)
+        return ordenadas
     }
 
     func esDeVsCode(pid: Int) -> Bool {

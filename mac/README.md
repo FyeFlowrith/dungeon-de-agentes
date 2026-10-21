@@ -4,6 +4,9 @@ App nativa (Swift + WebKit, sin Chrome ni Node) para quien usa Claude Code en la
 
 - Ventana propia con las tarjetas, buscador arriba (Cmd+F, Esc borra) y tarjetas de tamaño fijo que se
   acomodan por fila al agrandar la ventana.
+- Las mismas tarjetas que la extensión: héroe, slime, franja de contexto, pila de monedas con el gasto
+  («≈ u$s», a precio de lista) y la ayuda al pasar el mouse. Qué es cada cosa y de dónde sale: en el
+  [README principal](../README.md).
 - Ícono en el Dock (con numerito de agentes que te necesitan) y en la barra de menú.
 - **Siempre visible** (📌 junto al buscador, ⇧⌘T o el menú): queda por encima de todas las ventanas.
 - Cerrar la ventana la esconde; clic en el Dock la vuelve a mostrar. Cmd+Q la cierra.
@@ -44,6 +47,6 @@ ditto "build/Dungeon de agentes.app" "/Applications/Dungeon de agentes.app"
 
 | Archivo | Qué hace |
 | --- | --- |
-| `main.swift` | Lectura de agentes (port de `../vscode/sesiones.js`), ventana, Dock, barra de menú, ir a la pestaña. |
-| `web/` | La vista: `index.html` (buscador, «Siempre visible») + `view.js`/`view.css` y sprites (los mismos de la extensión). |
+| `main.swift` | Lectura de agentes, contexto, gasto y su nivel (port de `../vscode/sesiones.js`), ventana, Dock, barra de menú, ir a la pestaña. |
+| `web/` | La vista: `index.html` (buscador, «Siempre visible») + `view.js`/`view.css` (copias de `../vscode/media/`: cambialos allá y copialos acá) y los sprites. |
 | `armar.sh` | Compila (arm64 + x86_64), arma el `.app` con el ícono y lo firma ad hoc. |

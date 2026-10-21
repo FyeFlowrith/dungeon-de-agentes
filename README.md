@@ -9,10 +9,38 @@ lleva a ese agente.
 | [`vscode/`](vscode/) | Extensión de VS Code: una vista lateral con las tarjetas. | Quien usa Claude Code dentro de VS Code. |
 | [`mac/`](mac/) | App nativa de macOS (Swift + WebKit, sin dependencias): ventana propia, ícono en el Dock y en la barra de menú, buscador y opción «Siempre visible». | Quien usa Claude Code en la Terminal (o en ambos). |
 
-Las dos leen lo mismo: los agentes vivos de `~/.claude/sessions/<pid>.json` (el estado que publica Claude
-Code) y el título, la rama y la herramienta en uso de su transcripción
-(`~/.claude/projects/*/<sessionId>.jsonl`). La lógica está en `vscode/sesiones.js` y portada a Swift en
-`mac/main.swift`: si cambiás una, cambiá la otra.
+## Qué muestra cada tarjeta
+
+- **El héroe en su cuarto**, según el estado del agente: TRABAJANDO (en el escritorio), TE NECESITA (con un
+  «!», y la tarjeta late), TERMINÓ (festeja con un ✓), EN PAUSA (lee junto al fuego), SIN CUOTA (duerme en
+  la enfermería: llegó al límite de uso del plan).
+- **Su slime**, una mascota de un color propio por agente que reacciona al estado: da saltitos mientras
+  trabaja, se esconde temblando detrás del héroe cuando te necesita, salta contento cuando terminó y duerme
+  en pausa.
+- **Franja de contexto** arriba de la tarjeta: cuánto de la ventana de contexto lleva usado la sesión
+  («CONTEXTO 66 %»), azul, ámbar desde 70 % y roja titilando desde 90 %.
+- **Pila de monedas con un cartelito** («≈ u$s 35,75»): cuánto «pesa» la sesión. Es el valor de sus tokens
+  a precio de lista, **no un cobro** (con una suscripción no se paga por token). El tamaño de la pila y el
+  color del monto dicen si es baja, media o alta **comparada con el uso de la propia persona** (ver abajo).
+- **Ayuda al pasar el mouse**, con todos los datos de la sesión.
+- Arriba, un **buscador** (nombre, carpeta o rama). Las tarjetas miden 220 px y se ponen una al lado de la
+  otra si hay lugar.
+
+## De dónde salen los datos
+
+Todo sale de archivos que Claude Code ya guarda en tu Mac; no se consulta nada afuera.
+
+| Dato | Fuente |
+| --- | --- |
+| Agentes vivos y su estado | `~/.claude/sessions/<pid>.json` (lo publica Claude Code por cada proceso: `busy` / `idle` / `waiting`) |
+| Título, rama, herramienta en uso, límite de uso | la transcripción de la sesión, `~/.claude/projects/*/<sessionId>.jsonl` |
+| Contexto usado | el `usage` de la última respuesta del agente (tokens nuevos + guardados); la ventana es de 1 millón en Opus 5.5 y Fable 5.1, y de 200 mil en el resto salvo que la sesión ya la haya pasado |
+| Gasto | el último `cost-state` (`totalCostUSD`) que Claude Code anota de a ratos en la transcripción |
+| Nivel del gasto | con 3 o más sesiones abiertas con gasto, se reparten en tercios entre ellas; con menos, se comparan con las sesiones de la misma persona de las últimas 2 semanas (recalculado cada hora); sin historial, sin nivel |
+
+La lectura está en `vscode/sesiones.js` y portada a Swift en `mac/main.swift`; el dibujo
+(`vscode/media/view.js` y `view.css`) es el mismo archivo en las dos (`mac/web/` es una copia). Si cambiás
+una, cambiá la otra.
 
 Cómo armar, instalar y diagnosticar cada una: en el README de su carpeta.
 

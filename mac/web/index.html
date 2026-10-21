@@ -64,7 +64,7 @@
 <body>
 <div id="buscar"><input id="q" type="search" placeholder="Buscar agente…" autocomplete="off" spellcheck="false" aria-label="Buscar agente"><button id="fijar" type="button" aria-pressed="false" title="Siempre visible: dejar el dungeon por encima de todas las ventanas (⇧⌘T)" aria-label="Siempre visible">📌</button></div>
 <div id="lista"></div>
-<p id="vacio" hidden></p>
+<p id="vacio" hidden>No hay agentes de Claude abiertos. Abrí uno con claude en la Terminal.</p>
 <script>
   // La vista es la misma de la extensión de VS Code: acá su canal con el editor pasa a ser la app nativa
   // (window.webkit.messageHandlers.dungeon), que además llama a window.recibir() con los agentes.
@@ -83,24 +83,12 @@
     postMessage(msg) { if (nativo) nativo.postMessage(msg); },
   });
 
-  // Buscador: filtra por nombre, carpeta y rama, sin importar mayúsculas ni acentos.
+  // El buscador lo maneja view.js (el mismo de la extensión de VS Code); acá llegan todos los agentes.
+  window.recibir = sesiones => window.postMessage({ tipo: 'sesiones', sesiones }, '*');
   const q = document.getElementById('q');
-  const vacio = document.getElementById('vacio');
-  let todas = [];
-  const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-
-  function aplicar() {
-    const texto = norm(q.value.trim());
-    const sesiones = texto
-      ? todas.filter(s => norm(`${s.titulo} ${s.repo} ${s.branch}`).includes(texto))
-      : todas;
-    vacio.textContent = todas.length === 0
-      ? 'No hay agentes de Claude abiertos. Abrí uno con claude en la Terminal.'
-      : `Ningún agente coincide con «${q.value.trim()}».`;
-    window.postMessage({ tipo: 'sesiones', sesiones }, '*');
-  }
-
-  window.recibir = sesiones => { todas = sesiones; aplicar(); };
+  document.addEventListener('keydown', e => {
+    if (e.metaKey && e.key.toLowerCase() === 'f') { e.preventDefault(); q.focus(); q.select(); }
+  });
 
   // Botón «Siempre visible»: lo alterna la app nativa, que después avisa el estado.
   const fijar = document.getElementById('fijar');
@@ -111,15 +99,6 @@
       ? 'Siempre visible (prendido): clic para que vuelva a comportarse como una ventana común (⇧⌘T)'
       : 'Siempre visible: dejar el dungeon por encima de todas las ventanas (⇧⌘T)';
   };
-  q.addEventListener('input', aplicar);
-  q.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { q.value = ''; aplicar(); q.blur(); }
-  });
-  document.addEventListener('keydown', e => {
-    if (e.metaKey && e.key.toLowerCase() === 'f') { e.preventDefault(); q.focus(); q.select(); return; }
-    // Empezar a escribir con la ventana activa va directo al buscador.
-    if (document.activeElement !== q && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && e.key !== ' ') q.focus();
-  });
 </script>
 <script src="view.js"></script>
 </body>

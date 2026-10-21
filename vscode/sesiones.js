@@ -311,6 +311,8 @@ function tarjeta(id, proc, info, carpeta, estado, detalle, ahora) {
     costo: info && typeof info.costo === 'number' ? Math.round(info.costo * 100) / 100 : null,
     contexto: info && info.contexto ? info.contexto : null,
     ventana: info ? ventanaDe(info) : 200000,
+    subagentes: 0,
+    esperandoSubagentes: false,
   };
 }
 
@@ -400,9 +402,11 @@ function leerSesiones(pineadas = []) {
     let info = null;
     try { info = file ? infoTranscripcion(file) : null; } catch { info = null; }
     let { estado, detalle } = estadoDe(proc, info, ahora);
+    const sub = file ? subagentesActivos(file, ahora) : 0; // el slime de la tarjeta
+    let esperandoSubagentes = false;
     if (estado === 'done' || estado === 'idle') { // también con status `shell` de Claude
       // Libre para Claude, pero con trabajo en segundo plano: subagentes o comandos que dejó corriendo
-      const sub = file ? subagentesActivos(file, ahora) : 0;
+      esperandoSubagentes = sub > 0;
       if (!comandosFondo) comandosFondo = comandosDeFondoPorPid();
       const cmd = comandosFondo.get(proc.pid) || 0;
       const partes = [];
@@ -412,7 +416,10 @@ function leerSesiones(pineadas = []) {
       if (partes.length) { estado = 'working'; detalle = `${partes.join(' y ')} en segundo plano`; }
     }
     const carpeta = proc.cwd || (info && info.carpeta) || '';
-    out.push(tarjeta(proc.sessionId, proc, info, carpeta, estado, detalle, ahora));
+    const t = tarjeta(proc.sessionId, proc, info, carpeta, estado, detalle, ahora);
+    t.subagentes = sub;
+    t.esperandoSubagentes = esperandoSubagentes;
+    out.push(t);
   }
 
   for (const p of pineadas) {

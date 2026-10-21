@@ -26,7 +26,10 @@ struct Sesion: Encodable {
     let costo: Double?     // gasto de la sesión a precio de lista (cost-state de Claude Code)
     let contexto: Int?     // tokens cargados en la última respuesta
     let ventana: Int       // ventana de contexto de la sesión
+    let subagentes: Int    // subagentes trabajando ahora (el slime de la tarjeta)
+    let esperandoSubagentes: Bool // Claude ya está libre y solo espera a sus subagentes
     var nivelGasto: Int? = nil // 0 bajo, 1 medio, 2 alto, comparado con el uso de la propia persona
+    var pineada = false    // pineada en alguna ventana de VS Code (pid 0: sin agente corriendo)
 }
 
 final class Info {
@@ -46,6 +49,7 @@ final class Lector {
     private let sessions: URL
     private var cache: [String: (size: UInt64, mtime: Double, info: Info)] = [:]
     private var rutas: [String: String] = [:]
+    private var idPorTitulo: [String: (id: String?, ts: Double)] = [:] // carpeta|título -> sessionId (para no buscar cada 2 s)
 
     private let tailBytes: UInt64 = 384 * 1024
     private let headBytes: UInt64 = 64 * 1024
@@ -333,7 +337,8 @@ final class Lector {
         return ("unknown", status ?? "")
     }
 
-    /// Los agentes de Claude Code que están corriendo ahora, primero los que te necesitan.
+    /// Los agentes de Claude Code que están corriendo ahora, más las conversaciones pineadas en VS Code aunque
+    /// su agente no esté corriendo. Primero las pineadas; dentro de cada grupo, las que te necesitan.
     func leer() -> [Sesion] {
         let ahora = Date().timeIntervalSince1970 * 1000
         guard let archivos = try? fm.contentsOfDirectory(atPath: sessions.path) else { return [] }
@@ -350,9 +355,11 @@ final class Lector {
             let transcripcion = buscarTranscripcion(sid)
             let info = transcripcion.flatMap { infoTranscripcion($0) }
             var (est, detalle) = estado(p, info, ahora: ahora)
+            let sub = transcripcion.map { subagentesActivos($0, ahora: ahora) } ?? 0
+            var esperandoSubagentes = false
             if est == "done" || est == "idle" {
                 // Libre para Claude, pero con trabajo en segundo plano: subagentes o comandos que dejó corriendo
-                let sub = transcripcion.map { subagentesActivos($0, ahora: ahora) } ?? 0
+                esperandoSubagentes = sub > 0
                 if comandosFondo == nil { comandosFondo = comandosDeFondoPorPid() }
                 let cmd = comandosFondo?[pid] ?? 0
                 var partes: [String] = []
@@ -371,16 +378,99 @@ final class Lector {
                 estado: est, detalle: detalle, edadMs: ahora - ref, nacio: (p["startedAt"] as? Double) ?? 0,
                 heroe: heroe(sid), enVsCode: true,
                 pista: enVsCode ? "Clic para abrirla en VS Code" : "Clic para ir a su pestaña de la Terminal",
-                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info)))
+                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info),
+                subagentes: sub, esperandoSubagentes: esperandoSubagentes))
         }
+
+        // Las conversaciones pineadas en VS Code, aunque su agente no esté corriendo (como en la extensión)
+        for pin in pineadasDeVsCode() {
+            var id = pin.id
+            if id == nil, !pin.carpeta.isEmpty {
+                let clave = "\(pin.carpeta)|\(pin.titulo)"
+                // Lo no encontrado se reintenta al minuto (la conversación puede recibir su título más tarde).
+                if let previo = idPorTitulo[clave], previo.id != nil || ahora - previo.ts <= 60 * 1000 {
+                    id = previo.id
+                } else {
+                    let vivoConTitulo = out.first { $0.carpeta == pin.carpeta && mismoTitulo($0.titulo, pin.titulo) }
+                    id = vivoConTitulo?.id ?? buscarPorTitulo(pin.carpeta, pin.titulo)
+                    idPorTitulo[clave] = (id, ahora)
+                }
+            }
+            guard let id else { continue }
+            if let i = out.firstIndex(where: { $0.id == id }) { out[i].pineada = true; continue }
+            let transcripcion = buscarTranscripcion(id)
+            let info = transcripcion.flatMap { infoTranscripcion($0) }
+            let carpeta = pin.carpeta.isEmpty ? info?.carpeta ?? "" : pin.carpeta
+            var t = Sesion(
+                id: id, pid: 0, titulo: [info?.titulo ?? "", pin.titulo].first { !$0.isEmpty } ?? "Sesión nueva",
+                branch: info?.branch ?? "", repo: carpeta.isEmpty ? "" : (carpeta as NSString).lastPathComponent,
+                carpeta: carpeta, estado: "idle", detalle: "agente sin abrir: tocala para retomarla", edadMs: 0, nacio: 0,
+                heroe: heroe(id), enVsCode: true, pista: "Clic para abrirla en VS Code",
+                costo: info?.costo.map { ($0 * 100).rounded() / 100 }, contexto: info?.contexto, ventana: ventana(info),
+                subagentes: 0, esperandoSubagentes: false)
+            t.pineada = true
+            vistos.insert(id)
+            out.append(t)
+        }
+
         let usados = Set(vistos.compactMap { rutas[$0] })
         for k in cache.keys where !usados.contains(k) { cache.removeValue(forKey: k) }
         var ordenadas = out.sorted {
+            if $0.pineada != $1.pineada { return $0.pineada }
             let (a, b) = (prioridad[$0.estado] ?? 9, prioridad[$1.estado] ?? 9)
             return a != b ? a < b : $0.nacio > $1.nacio
         }
         asignarNivelesDeGasto(&ordenadas)
         return ordenadas
+    }
+
+    // Cada ventana de VS Code con la extensión publica sus pineadas en <globalStorage>/pineadas/<pid>.json
+    // (las de ventanas cerradas se ignoran; las borra la extensión).
+    private func pineadasDeVsCode() -> [(id: String?, titulo: String, carpeta: String)] {
+        let global = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Code/User/globalStorage")
+        var out: [(id: String?, titulo: String, carpeta: String)] = []
+        let dirs = ((try? fm.contentsOfDirectory(atPath: global.path)) ?? []).filter { $0.lowercased().hasSuffix(".dungeon-de-agentes") }
+        for d in dirs {
+            let dir = global.appendingPathComponent(d).appendingPathComponent("pineadas")
+            for f in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where f.range(of: "^\\d+\\.json$", options: .regularExpression) != nil {
+                guard let data = fm.contents(atPath: dir.appendingPathComponent(f).path),
+                      let p = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      let pid = p["pid"] as? Int, vivo(pid) else { continue }
+                let carpeta = p["carpeta"] as? String ?? ""
+                for s in p["sesiones"] as? [[String: Any]] ?? [] {
+                    out.append((s["id"] as? String, s["titulo"] as? String ?? "", carpeta))
+                }
+            }
+        }
+        return out
+    }
+
+    private func mismoTitulo(_ a: String, _ b: String) -> Bool {
+        func norm(_ s: String) -> String {
+            s.replacingOccurrences(of: "(…|\\.\\.\\.)\\s*$", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces).lowercased()
+        }
+        let (x, y) = (norm(a), norm(b))
+        if x.isEmpty || y.isEmpty { return false }
+        return x == y || (min(x.count, y.count) >= 6 && (x.hasPrefix(y) || y.hasPrefix(x)))
+    }
+
+    // Una pestaña pineada de la que no se sabe la sesión: se busca por título entre las transcripciones
+    // recientes de su carpeta (~/.claude/projects/<carpeta con lo que no es letra o número cambiado por ->/).
+    private func buscarPorTitulo(_ carpeta: String, _ titulo: String) -> String? {
+        let dir = projects.appendingPathComponent(carpeta.replacingOccurrences(of: "[^a-zA-Z0-9]", with: "-", options: .regularExpression))
+        let files = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { $0.pathExtension == "jsonl" }
+            .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+            .sorted { $0.1 > $1.1 }.prefix(40)
+        for (url, _) in files {
+            if let info = infoTranscripcion(url.path), mismoTitulo(info.titulo, titulo) {
+                let id = url.deletingPathExtension().lastPathComponent
+                rutas[id] = url.path
+                return id
+            }
+        }
+        return nil
     }
 
     func esDeVsCode(pid: Int) -> Bool {
@@ -754,7 +844,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         if tipo == "listo" { ultimoJson = ""; refrescar(); aplicarSiempreVisible(); return }
         if tipo == "siempreVisible" { alternarSiempreVisible(); return }
         guard tipo == "abrir", let id = msg["id"] as? String, let s = ultimas.first(where: { $0.id == id }) else { return }
-        let deVsCode = lector.esDeVsCode(pid: s.pid)
+        let deVsCode = s.pid == 0 || lector.esDeVsCode(pid: s.pid) // pid 0: pineada de VS Code sin agente
         DispatchQueue.global().async {
             let motivo = Foco.ir(pid: s.pid, id: s.id, carpeta: s.carpeta, deVsCode: deVsCode)
             guard let motivo else { return }

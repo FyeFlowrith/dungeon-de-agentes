@@ -11,7 +11,8 @@ que cambia según lo que está haciendo. Aparece con el ícono del personajito e
 | EN PAUSA | `idle` desde hace más de 20 min, o pestaña pineada sin agente corriendo |
 | SIN CUOTA | Llegó al límite de uso |
 
-Cada tarjeta suma el **slime** del agente, la **franja de contexto** arriba y la **pila de monedas con
+Cada tarjeta suma el **slime** del agente (sus subagentes: duerme sin ninguno, trabaja con un globito que
+dice cuántos son), la **franja de contexto** arriba y la **pila de monedas con
 el gasto** («≈ u$s», a precio de lista, con su nivel comparado con tus otras sesiones); al pasar el mouse
 aparecen todos los datos. Qué es cada cosa y de dónde sale: en el [README principal](../README.md).
 
@@ -47,7 +48,7 @@ aparecen todos los datos. Qué es cada cosa y de dónde sale: en el [README prin
 - **Ver qué agentes detecta y en qué estado**, sin VS Code (desde esta carpeta, con Node 18 o más):
 
   ```bash
-  node -e 'for (const s of require("./sesiones").leerSesiones()) console.log(s.estado, "|", s.titulo, "|", s.costo, s.nivelGasto, "|", s.contexto, "/", s.ventana)'
+  node -e 'for (const s of require("./sesiones").leerSesiones()) console.log(s.estado, "|", s.titulo, "|", s.costo, s.nivelGasto, "|", s.contexto, "/", s.ventana, "| subagentes:", s.subagentes, s.esperandoSubagentes ? "(los espera)" : "")'
   ```
 
 - Después de instalar una versión nueva, recargá **cada** ventana de VS Code (Cmd+Shift+P → «Developer:

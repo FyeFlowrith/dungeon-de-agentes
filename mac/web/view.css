@@ -146,3 +146,9 @@ canvas {
 .tip { position: fixed; z-index: 50; max-width: 280px; padding: 7px 9px; border: 1px solid #6b4e36; border-radius: 6px;
   background: #17110d; color: #f3e6d0; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre-line;
   box-shadow: 0 4px 14px rgba(0, 0, 0, .45); pointer-events: none; }
+
+/* Globito con la cantidad de subagentes, sobre la cabeza del slime */
+.globo { position: absolute; transform: translate(-35%, -85%); pointer-events: none; min-width: 16px; height: 16px;
+  padding: 0 4px; box-sizing: border-box; border: 2px solid #140c08; border-radius: 999px; background: #fff;
+  color: #140c08; font: 700 10px/12px ui-monospace, Menlo, monospace; text-align: center;
+  box-shadow: 0 2px 0 rgba(20, 12, 8, .45); }

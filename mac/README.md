@@ -4,7 +4,7 @@ App nativa (Swift + WebKit, sin Chrome ni Node) para quien usa Claude Code en la
 
 - Ventana propia con las tarjetas, buscador arriba (Cmd+F, Esc borra) y tarjetas de 220 px como mínimo que se
   acomodan por fila al agrandar la ventana y se estiran para llenar el ancho.
-- Las mismas tarjetas que la extensión: héroe, slime, franja de contexto, pila de monedas con el gasto
+- Las mismas tarjetas que la extensión: héroe, slime (sus subagentes), franja de contexto, pila de monedas con el gasto
   («≈ u$s», a precio de lista) y la ayuda al pasar el mouse. Qué es cada cosa y de dónde sale: en el
   [README principal](../README.md).
 - Ícono en el Dock (con numerito de agentes que te necesitan) y en la barra de menú.
@@ -13,6 +13,8 @@ App nativa (Swift + WebKit, sin Chrome ni Node) para quien usa Claude Code en la
 - Clic en una tarjeta: si el agente corre en Terminal o iTerm2, va a su pestaña; si corre en VS Code,
   abre VS Code en la ventana y la pestaña de esa conversación (con la extensión de `../vscode` instalada;
   sin ella, usa el link de la extensión de Claude).
+- Con la extensión de `../vscode` instalada, también muestra arriba las conversaciones **pineadas** en VS Code,
+  aunque su agente no esté corriendo (las mismas tarjetas que ves en VS Code; clic para retomarla allá).
 
 ## Armar e instalar
 

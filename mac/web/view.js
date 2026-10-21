@@ -57,7 +57,7 @@
     el.tabIndex = 0;
     el.setAttribute('role', 'button');
     el.innerHTML = '<div class="hud" hidden><span class="lleno"></span><span class="txt"><span>CONTEXTO</span><span class="pct"></span></span></div>' +
-      '<canvas></canvas><div class="cartel" hidden><span class="moneda">≈ u$s</span><span class="monto"></span></div>' +
+      '<canvas></canvas><div class="globo" hidden></div><div class="cartel" hidden><span class="moneda">≈ u$s</span><span class="monto"></span></div>' +
       '<div class="pie"><div class="titulo"></div>' +
       '<div class="linea"><span class="rama"></span><span class="estado"></span></div></div>';
     const abrir = () => vscode.postMessage({
@@ -249,6 +249,60 @@
     const s = salto(now, periodo, alto);
     const aplastado = reducido ? 0 : (s > alto * 0.3 ? -0.12 : 0.14 * (1 - s / (alto * 0.3 || 1)));
     slime(ctx, base, x, piso - s, { aplastado });
+    return { x: x + SW, y: piso - s - SH };
+  }
+
+  // Brazos cruzados, pintados sobre el torso de cada héroe con los colores de su ropa (en píxeles del
+  // sprite de 16×16): [columna donde empiezan, fila, manga, mano].
+  const BRAZOS = [
+    [3, 9, '#be4a2f', '#e8b796'], [2, 9, '#3a4466', '#c0cbdc'], [3, 9, '#4a2650', '#c0cbdc'],
+    [4, 9, '#0b3a6a', '#e8b796'], [2, 9, '#30343f', '#e8b796'], [4, 9, '#2c6235', '#e8b796'],
+  ];
+  const BRAZOS_MAPA = ['OOOOOOOOO', 'OHSSSSSSO', 'OSSSSSSHO', 'OOOOOOOOO'];
+
+  function heroeDeBrazosCruzados(ctx, h, x, y, espejo) {
+    heroe(ctx, h, false, 0, x, y, espejo);
+    const [c0, f0, manga, mano] = BRAZOS[h % BRAZOS.length];
+    const k = HU / T;
+    ctx.save();
+    if (espejo) { ctx.translate(x + HU, y); ctx.scale(-1, 1); } else ctx.translate(x, y);
+    BRAZOS_MAPA.forEach((fila, j) => [...fila].forEach((ch, i) => {
+      ctx.fillStyle = ch === 'O' ? '#181425' : ch === 'H' ? mano : manga;
+      ctx.fillRect((c0 + i) * k, (f0 + j) * k, k + 0.05, k + 0.05);
+    }));
+    ctx.restore();
+  }
+
+  // Reloj de arena en un globo de pensamiento sobre la cabeza (cx: centro de la cabeza, y: tope del héroe).
+  // La arena cae y se vuelve a llenar cada 3 segundos.
+  function relojDeArena(ctx, cx, y, now) {
+    const w = 16, h = 18, x0 = cx - w / 2, y0 = y - h - 5;
+    ctx.save();
+    // puntitos que unen el globo con la cabeza
+    ctx.fillStyle = '#140c08'; ctx.fillRect(cx - 1.6, y - 4.6, 3.2, 3.2); ctx.fillRect(cx + 2.4, y - 7.2, 2.2, 2.2);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(cx - 0.8, y - 3.8, 1.6, 1.6); ctx.fillRect(cx + 2.9, y - 6.7, 1.2, 1.2);
+    // globo
+    ctx.fillStyle = '#140c08'; ctx.fillRect(x0 - 1, y0, w + 2, h); ctx.fillRect(x0, y0 - 1, w, h + 2);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(x0, y0, w, h);
+    // marco de madera
+    const mx0 = x0 + 3, mx1 = x0 + w - 3, top = y0 + 2.5, bot = y0 + h - 4, mid = (top + bot) / 2 + 1, c = x0 + w / 2;
+    ctx.fillStyle = '#8a5a2b'; ctx.fillRect(mx0 - 1, top - 1.5, mx1 - mx0 + 2, 1.8); ctx.fillRect(mx0 - 1, bot, mx1 - mx0 + 2, 1.8);
+    // vidrio
+    ctx.strokeStyle = '#140c08'; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.moveTo(mx0, top + 0.4); ctx.lineTo(c - 0.6, mid); ctx.lineTo(mx0, bot - 0.2);
+    ctx.moveTo(mx1, top + 0.4); ctx.lineTo(c + 0.6, mid); ctx.lineTo(mx1, bot - 0.2); ctx.stroke();
+    // arena: arriba se vacía, abajo se junta
+    const p = reducido ? 0.5 : (now % 3000) / 3000;
+    ctx.fillStyle = '#e8a33a';
+    const arriba = (1 - p) * (mid - top - 1.2);
+    if (arriba > 0.3) {
+      const ya = mid - 1 - arriba, k = (mid - ya) / (mid - top);
+      ctx.beginPath(); ctx.moveTo(c - (c - mx0 - 0.8) * k, ya); ctx.lineTo(c + (c - mx0 - 0.8) * k, ya); ctx.lineTo(c, mid - 0.6); ctx.fill();
+    }
+    const abajo = p * (bot - mid - 1);
+    ctx.beginPath(); ctx.moveTo(mx0 + 0.8, bot - 0.3); ctx.lineTo(mx1 - 0.8, bot - 0.3); ctx.lineTo(c, bot - 0.3 - abajo); ctx.fill();
+    if (p < 0.97 && !reducido) ctx.fillRect(c - 0.35, mid - 0.6, 0.7, bot - mid - abajo);
+    ctx.restore();
   }
 
   function slimeDurmiendo(ctx, base, x, piso, now, seg) {
@@ -273,20 +327,33 @@
     const tick = reducido ? 0 : Math.floor(now / 1000 * 6);
     const h = s.heroe;
     const color = colorSlime(s.id);
+    // El slime representa a los subagentes: con alguno trabajando se despierta y trabaja; si no, duerme.
+    const nSub = s.subagentes || 0;
+    t.slimeCabeza = null;
+    if (nSub > 0 && s.esperandoSubagentes) {
+      // El agente ya terminó lo suyo y solo espera a sus subagentes: de brazos cruzados, con un reloj de
+      // arena sobre la cabeza, mirando al slime que trabaja junto al escritorio.
+      if (img.workingFront.complete) ctx.drawImage(img.workingFront, 0, 0, RW, RH);
+      t.slimeCabeza = slimeSaltando(ctx, color, 84, 70, now, 650, 6);
+      heroeDeBrazosCruzados(ctx, h, 30, PISO, false);
+      relojDeArena(ctx, 30 + HU / 2, PISO + 2 - (reducido ? 0 : Math.abs(Math.sin(now / 600)) * 1.2), now);
+      return;
+    }
     switch (s.estado) {
       case 'working': {
-        // parado detrás del escritorio (tapa de y=44 a 57), trabajando sobre él; el slime da
-        // saltitos al lado del escritorio
+        // parado detrás del escritorio (tapa de y=44 a 57), trabajando sobre él; si tiene subagentes, el
+        // slime da saltitos al lado del escritorio
         heroe(ctx, h, true, tick, CX, 44 - HU + 9, false);
         if (img.workingFront.complete) ctx.drawImage(img.workingFront, 0, 0, RW, RH);
-        slimeSaltando(ctx, color, 101, 70, now, 1300, 3);
+        if (nSub) t.slimeCabeza = slimeSaltando(ctx, color, 101, 70, now, 1300, 3);
+        else slimeDurmiendo(ctx, color, 101, 72, now, seg);
         break;
       }
       case 'blocked': {
-        // el slime se esconde detrás del héroe, temblando (se dibuja antes para que el héroe lo tape)
-        const tiembla = reducido ? 0 : Math.sin(now / 35) * 0.6;
-        slime(ctx, color, CX + 16 + tiembla, 70, { aplastado: 0.12, susto: true });
         const sl = reducido ? 0 : Math.abs(Math.sin(now / 180)) * 4;
+        // sus subagentes siguen trabajando al lado; sin subagentes, el slime duerme
+        if (nSub) t.slimeCabeza = slimeSaltando(ctx, color, CX + HU + 6, 70, now, 1100, 3);
+        else slimeDurmiendo(ctx, color, CX + HU + 6, 72, now, seg);
         heroe(ctx, h, false, tick, CX, PISO - sl, false);
         const vis = reducido || Math.floor(now / 400) % 2 === 0;
         if (vis) pixelTexto(ctx, '#ff4a3a', CX + HU / 2 - 1, PISO - 10 - sl, EXCL);
@@ -296,17 +363,19 @@
         const sl = reducido ? 0 : Math.abs(Math.sin(now / 220)) * 3;
         heroe(ctx, h, false, tick, CX, PISO - sl, false);
         pixelTexto(ctx, '#6fcf5a', CX + HU / 2 - 4, PISO - 10 - sl, TILDE);
-        slimeSaltando(ctx, color, CX + HU + 6, 70, now, 520, 10); // salta contento
+        if (nSub) t.slimeCabeza = slimeSaltando(ctx, color, CX + HU + 6, 70, now, 520, 10);
+        else slimeDurmiendo(ctx, color, CX + HU + 6, 72, now, seg);
         break;
       }
       case 'idle': {
-        // junto al fuego, mirando hacia la ventana; el slime duerme en la alfombra
+        // junto al fuego, mirando hacia la ventana
         heroe(ctx, h, false, Math.floor(tick / 6), 96, 30, true);
-        slimeDurmiendo(ctx, color, 64, 76, now, seg);
+        if (nSub) t.slimeCabeza = slimeSaltando(ctx, color, 64, 76, now, 1300, 3);
+        else slimeDurmiendo(ctx, color, 64, 76, now, seg);
         break;
       }
       case 'limited': {
-        // acostado en la camilla (x 52–92, y 52–66); el slime duerme en el piso, al lado
+        // acostado en la camilla (x 52–92, y 52–66)
         ctx.save();
         ctx.translate(66, 59);
         ctx.rotate(-Math.PI / 2);
@@ -314,7 +383,8 @@
         ctx.restore();
         const sube = reducido ? 0 : (seg * 3) % 8;
         pixelTexto(ctx, '#d8e4ff', 76, 40 - sube, ZZZ);
-        slimeDurmiendo(ctx, color, 96, 76, now, seg);
+        if (nSub) t.slimeCabeza = slimeSaltando(ctx, color, 96, 76, now, 1300, 3);
+        else slimeDurmiendo(ctx, color, 96, 76, now, seg);
         break;
       }
       default: {
@@ -324,8 +394,8 @@
           if (t.x < 14) t.dir = 1;
         }
         heroe(ctx, h, false, Math.floor(tick / 2), t.x, PISO, t.dir < 0);
-        // el slime lo sigue, del lado de atrás
-        slimeSaltando(ctx, color, t.dir > 0 ? t.x - SW - 2 : t.x + HU + 2, 70, now, 700, 4);
+        if (nSub) t.slimeCabeza = slimeSaltando(ctx, color, t.dir > 0 ? t.x - SW - 2 : t.x + HU + 2, 70, now, 700, 4);
+        else slimeDurmiendo(ctx, color, 20, 76, now, seg);
       }
     }
   }
@@ -356,6 +426,18 @@
   // Cartelito de precio: es texto HTML apoyado sobre el dibujo (siempre del mismo tamaño, se lea en la
   // tarjeta que sea); en el cuarto solo va el palito que lo sostiene, clavado en la pila.
   const PALITO_X = 31;
+  function dibujarGlobo(t) {
+    const globo = t.el.querySelector('.globo');
+    const n = t.s.subagentes || 0;
+    if (n < 1 || !t.slimeCabeza) { globo.hidden = true; return; }
+    const m = t.ctx.getTransform(), dpr = window.devicePixelRatio || 1;
+    globo.style.left = `${(m.a * t.slimeCabeza.x + m.e) / dpr}px`;
+    globo.style.top = `${(m.d * t.slimeCabeza.y + m.f) / dpr + t.canvas.offsetTop}px`;
+    const txt = String(n);
+    if (globo.textContent !== txt) globo.textContent = txt;
+    globo.hidden = false;
+  }
+
   function dibujarGasto(t, now) {
     const nivel = nivelGasto(t.s);
     const cartel = t.el.querySelector('.cartel');
@@ -381,7 +463,7 @@
   function loop(now) {
     if (now - ultimo > 1000 / 12) {
       ultimo = now;
-      for (const t of tarjetas.values()) { dibujar(t, now); if (t.s) dibujarGasto(t, now); }
+      for (const t of tarjetas.values()) { dibujar(t, now); if (t.s) { dibujarGlobo(t); dibujarGasto(t, now); } }
     }
     requestAnimationFrame(loop);
   }

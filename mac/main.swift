@@ -93,6 +93,11 @@ final class Lector {
         return arr.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined(separator: " ")
     }
 
+    // «You've hit your limit», «…your session limit», «…your org's monthly spend limit», «usage limit reached».
+    private func esAvisoLimite(_ t: String) -> Bool {
+        t.range(of: "hit your [^·\\n]{0,40}limit|usage limit reached", options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     private func limpiarPrompt(_ t: String) -> String {
         var s = t
         for patron in ["<[^>]+>[\\s\\S]*?</[^>]+>", "<[^>]+>", "\\s+"] {
@@ -276,8 +281,10 @@ final class Lector {
                     info.contexto = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens")
                     info.modelo = modelo
                 }
-                let txt = textoDe(content)
-                info.limitado = txt.range(of: "hit your (session|usage|weekly)? ?limit|usage limit reached", options: [.regularExpression, .caseInsensitive]) != nil
+                // El aviso de límite lo escribe Claude Code (mensaje sintético), no el modelo: si el agente solo
+                // habla de límites no cuenta.
+                let sintetico = m["model"] as? String == "<synthetic>" || d["isApiErrorMessage"] as? Bool == true
+                info.limitado = sintetico && esAvisoLimite(textoDe(content))
                 let stop = m["stop_reason"] as? String
                 if stop == "end_turn" || stop == "stop_sequence" { info.ultimo = "end_turn" } else if usaTool { info.ultimo = "tool_use" }
             } else if tipo == "user", d["isMeta"] as? Bool != true {
@@ -292,7 +299,9 @@ final class Lector {
                 }
             } else if tipo == "system", d["subtype"] as? String == "api_error" {
                 info.ultimo = "error"
-                if let data = try? JSONSerialization.data(withJSONObject: d), String(decoding: data.prefix(4000), as: UTF8.self).range(of: "limit", options: .caseInsensitive) != nil {
+                // Solo el mensaje del error: el JSON trae `rateLimits` hasta en un corte de conexión.
+                if let e = d["error"], JSONSerialization.isValidJSONObject(e), let data = try? JSONSerialization.data(withJSONObject: e),
+                   esAvisoLimite(String(decoding: data.prefix(4000), as: UTF8.self)) {
                     info.limitado = true
                 }
             }

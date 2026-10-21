@@ -2,8 +2,8 @@
 
 App nativa (Swift + WebKit, sin Chrome ni Node) para quien usa Claude Code en la Terminal.
 
-- Ventana propia con las tarjetas, buscador arriba (Cmd+F, Esc borra) y tarjetas de tamaño fijo que se
-  acomodan por fila al agrandar la ventana.
+- Ventana propia con las tarjetas, buscador arriba (Cmd+F, Esc borra) y tarjetas de 220 px como mínimo que se
+  acomodan por fila al agrandar la ventana y se estiran para llenar el ancho.
 - Las mismas tarjetas que la extensión: héroe, slime, franja de contexto, pila de monedas con el gasto
   («≈ u$s», a precio de lista) y la ayuda al pasar el mouse. Qué es cada cosa y de dónde sale: en el
   [README principal](../README.md).

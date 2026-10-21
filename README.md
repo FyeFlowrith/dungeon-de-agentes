@@ -23,8 +23,8 @@ lleva a ese agente.
   a precio de lista, **no un cobro** (con una suscripción no se paga por token). El tamaño de la pila y el
   color del monto dicen si es baja, media o alta **comparada con el uso de la propia persona** (ver abajo).
 - **Ayuda al pasar el mouse**, con todos los datos de la sesión.
-- Arriba, un **buscador** (nombre, carpeta o rama). Las tarjetas miden 220 px y se ponen una al lado de la
-  otra si hay lugar.
+- Arriba, un **buscador** (nombre, carpeta o rama). Las tarjetas miden 220 px como mínimo: se ponen una al
+  lado de la otra si hay lugar y se estiran para llenar el ancho.
 
 ## De dónde salen los datos
 

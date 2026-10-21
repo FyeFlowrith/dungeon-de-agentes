@@ -16,7 +16,7 @@ el gasto** («≈ u$s», a precio de lista, con su nivel comparado con tus otras
 aparecen todos los datos. Qué es cada cosa y de dónde sale: en el [README principal](../README.md).
 
 - Orden: primero las conversaciones **pineadas** (📌), después las que te necesitan.
-- Tarjetas de 220 px: si agrandás la barra lateral, se ponen una al lado de la otra.
+- Tarjetas de 220 px como mínimo: si agrandás la barra lateral se ponen una al lado de la otra, y siempre se estiran para llenar el ancho.
 - **Buscador** arriba de todo: filtra por nombre, carpeta o rama (sin importar mayúsculas ni acentos);
   empezar a escribir con la vista activa va directo a él, Esc lo borra.
 - Clic en una tarjeta: abre esa conversación, también si es de otra carpeta (trae al frente o abre la

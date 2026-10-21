@@ -43,16 +43,15 @@ body {
 #q::placeholder { color: var(--texto-suave); }
 #q:focus { border-color: #a07a3a; }
 
-/* Tarjetas de tamaño fijo: si la barra es ancha, se ponen una al lado de la otra; si es angosta, se achican */
-#lista { display: flex; flex-direction: row; flex-wrap: wrap; gap: 10px; }
+/* Grilla: tantas columnas como entren con un mínimo de 220 px; las tarjetas se estiran para llenar la fila */
+#lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 10px; }
 
 #vacio { color: var(--vscode-descriptionForeground); font-size: 12px; text-align: center; margin-top: 24px; }
 
 .card {
   display: block;
-  width: 220px;
-  max-width: 100%;
-  flex: none;
+  width: 100%;
+  min-width: 0;
   padding: 0;
   border: 2px solid var(--borde);
   border-radius: 6px;

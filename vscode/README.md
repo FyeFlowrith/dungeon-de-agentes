@@ -33,9 +33,10 @@ aparecen todos los datos. Qué es cada cosa y de dónde sale: en el [README prin
 | Archivo | Qué hace |
 | --- | --- |
 | `package.json` | Declara la vista lateral (`dungeonAgentes.view`). |
-| `extension.js` | Arranca la vista, refresca cada 2 s, abre sesiones (también en otra ventana, vía `abrir-sesion.json` en el `globalStorage`), y publica las pestañas de Claude de cada ventana, con cuáles están pineadas (`pineadas/<pid>.json`). |
+| `extension.js` | Arranca la vista, refresca cada 2 s (lee una sola ventana, la «lectora» de `lectora.json`, y deja el resultado en `sesiones.json` del `globalStorage` para las demás; si se cierra, otra toma su lugar), abre sesiones (también en otra ventana, vía `abrir-sesion.json` en el `globalStorage`), y publica las pestañas de Claude de cada ventana, con cuáles están pineadas (`pineadas/<pid>.json`). |
 | `sesiones.js` | Lee los agentes vivos de `~/.claude/sessions/<pid>.json` (estado que publica Claude Code) y de su transcripción (`~/.claude/projects/*/<sessionId>.jsonl`) el título, la rama, la herramienta en uso, el contexto y el gasto; calcula el nivel del gasto (comparado con las otras sesiones o con el historial de 2 semanas). No depende de VS Code: se puede probar con Node. |
-| `terminal.js` | Lleva a la pestaña de Terminal o iTerm2 donde corre un agente. |
+| `lector.js` | Corre `sesiones.js` en un hilo aparte (worker), para que las lecturas largas no frenen a las demás extensiones. |
+| `terminal.js` | Lleva a la pestaña de Terminal o iTerm2 donde corre un agente; la ✕ de la tarjeta lo termina (con sus procesos hijos) y cierra esa pestaña. Las pestañas de VS Code las cierra `extension.js`, la de otra ventana vía `cerrar/<pid>-<ts>.json` en el `globalStorage`. |
 | `media/view.js`, `media/view.css` | Dibujan las tarjetas (canvas): cuarto, héroe, slime, pila de monedas, cartelito, franja de contexto, buscador y la ayuda al pasar el mouse. La app de macOS usa una copia (`../mac/web/`). |
 | `media/*.png` | Sprites de Agents Pixel Dungeon. |
 

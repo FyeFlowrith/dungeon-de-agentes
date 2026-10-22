@@ -27,6 +27,10 @@ lleva a ese agente.
   a precio de lista, **no un cobro** (con una suscripción no se paga por token). El tamaño de la pila y el
   color del monto dicen si es baja, media o alta **comparada con el uso de la propia persona** (ver abajo).
 - **Ayuda al pasar el mouse**, con todos los datos de la sesión.
+- **✕ para cerrar el agente** (aparece al pasar el mouse; pide confirmar con un segundo clic): termina el
+  proceso del agente con todo lo que dejó corriendo (subagentes, comandos, servidores MCP) y cierra su
+  pestaña, en VS Code (en la ventana que la tenga) o en la Terminal / iTerm2. Si en la pestaña de la
+  Terminal queda corriendo otra cosa además de la shell, la deja abierta y avisa.
 - **Todas las pestañas de Claude abiertas en VS Code**, también las que todavía no arrancaron su agente
   (al reabrir VS Code, Claude lo arranca recién cuando entrás a la pestaña): aparecen EN PAUSA, «agente sin
   abrir». Primero las **pineadas** (📌). Las muestran la extensión y también la app de macOS, así las dos
@@ -41,7 +45,7 @@ Todo sale de archivos que Claude Code ya guarda en tu Mac; no se consulta nada a
 | Dato | Fuente |
 | --- | --- |
 | Agentes vivos y su estado | `~/.claude/sessions/<pid>.json` (lo publica Claude Code por cada proceso; sus estados posibles son `busy`, `shell` —libre con un comando corriendo en segundo plano—, `idle` y `waiting`) |
-| Trabajo en segundo plano | **subagentes** (el slime y su globito): las transcripciones en `<sesión>/subagents/` (y las de los workflows) que se escribieron en los últimos 45 s; **comandos**: las shells hijas del proceso de Claude (arrancan cargando `~/.claude/shell-snapshots/…`), contadas con `ps` solo cuando hay algún agente libre |
+| Trabajo en segundo plano | **subagentes** (el slime y su globito): las transcripciones en `<sesión>/subagents/` (y las de los workflows) que se escribieron en los últimos 45 s; **comandos**: las shells hijas del proceso de Claude (arrancan cargando `~/.claude/shell-snapshots/…`), contadas con `ps` solo cuando hay algún agente libre, como mucho cada 10 s |
 | Pestañas de Claude en VS Code (y cuáles están pineadas) | cada ventana de VS Code con la extensión las anota en su `globalStorage` (`pineadas/<pid>.json`, leídas de su estado con `sqlite3`); la app de macOS lee esos mismos archivos |
 | Título, rama, herramienta en uso, límite de uso | la transcripción de la sesión, `~/.claude/projects/*/<sessionId>.jsonl` |
 | Contexto usado | el `usage` de la última respuesta del agente (tokens nuevos + guardados); la ventana es de 1 millón en Opus 5.5 y Fable 5.1, y de 200 mil en el resto salvo que la sesión ya la haya pasado |

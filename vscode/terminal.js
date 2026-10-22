@@ -6,6 +6,8 @@
 // dos agentes en la misma carpeta tienen el mismo título, le pongo a la pestaña un título temporal único,
 // la elijo por ese título y le devuelvo el suyo. Hace falta que VS Code tenga permiso para controlar la
 // Terminal (macOS lo pide solo) y de Accesibilidad (para el menú Ventana).
+//
+// También termina agentes (la ✕ de la tarjeta): el proceso con todo lo que cuelga de él, y su pestaña.
 const { execFile } = require('child_process');
 
 function run(cmd, args) {
@@ -123,4 +125,86 @@ async function irATerminal(pid) {
   return 'No encontré la pestaña de ese agente (funciona con la Terminal de macOS e iTerm2).';
 }
 
-module.exports = { irATerminal, SIN_ACCESIBILIDAD };
+function vivo(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
+/** Termina el proceso del agente y todo lo que cuelga de él (subagentes, comandos, MCP). true si murió. */
+async function matarArbol(pid) {
+  const { out } = await run('/bin/ps', ['-axo', 'pid=,ppid=']);
+  const hijos = new Map();
+  for (const l of out.split('\n')) {
+    const [p, padre] = l.trim().split(/\s+/).map(Number);
+    if (!hijos.has(padre)) hijos.set(padre, []);
+    hijos.get(padre).push(p);
+  }
+  const todos = [];
+  for (const pila = [pid]; pila.length;) {
+    const p = pila.pop();
+    if (p > 1 && p !== process.pid && !todos.includes(p)) { todos.push(p); pila.push(...(hijos.get(p) || [])); }
+  }
+  const senal = s => { for (const p of todos) { try { process.kill(p, s); } catch { /* ya terminó */ } } };
+  senal('SIGTERM');
+  for (let i = 0; i < 30 && todos.some(vivo); i++) await esperar(100);
+  if (todos.some(vivo)) { senal('SIGKILL'); await esperar(200); }
+  return !vivo(pid);
+}
+
+// Cierra la pestaña de la Terminal con esa tty si ya no corre nada más que la shell (si no, la deja).
+async function cerrarEnTerminal(dev) {
+  const r = await osa(`
+    tell application id "com.apple.Terminal"
+      repeat with i from 1 to (count of windows)
+        repeat with j from 1 to (count of tabs of window i)
+          if tty of tab j of window i is "${dev}" then
+            set t to tab j of window i
+            set procesos to (get processes of t)
+            repeat with k from 1 to (count of procesos)
+              if {item k of procesos} is not in {"login", "-zsh", "zsh", "-bash", "bash", "-sh", "sh", "-fish", "fish"} then return "ocupada"
+            end repeat
+            if (count of tabs of window i) is 1 then
+              close window i
+            else
+              do script "exit" in t
+            end if
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end tell
+    return "no"`);
+  return r.out;
+}
+
+/** Termina un agente que corre en una terminal y cierra su pestaña. Devuelve null o el motivo para mostrar. */
+async function cerrarAgenteDeTerminal(pid) {
+  const { out: tty } = await run('/bin/ps', ['-o', 'tty=', '-p', String(pid)]);
+  if (!tty) return null; // ya no corría
+  if (!await matarArbol(pid)) return 'No pude terminar el agente.';
+  if (tty.startsWith('?')) return null;
+  const dev = `/dev/${tty}`;
+  await esperar(300); // que la Terminal vea que el agente terminó
+  if (await corriendo('iTerm2')) {
+    const r = await osa(`
+      tell application id "com.googlecode.iterm2"
+        repeat with w in windows
+          repeat with t in tabs of w
+            repeat with s in sessions of t
+              if tty of s is "${dev}" then
+                tell s to close
+                return "ok"
+              end if
+            end repeat
+          end repeat
+        end repeat
+      end tell
+      return "no"`);
+    if (r.out === 'ok') return null;
+  }
+  if (await corriendo('Terminal') && await cerrarEnTerminal(dev) === 'ocupada') {
+    return 'Terminé el agente, pero dejé abierta su pestaña de la Terminal porque tiene otros procesos corriendo.';
+  }
+  return null;
+}
+
+module.exports = { irATerminal, SIN_ACCESIBILIDAD, matarArbol, cerrarAgenteDeTerminal, vivo };

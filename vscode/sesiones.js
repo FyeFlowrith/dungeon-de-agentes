@@ -257,7 +257,13 @@ const FONDO_ACTIVO_MS = 45 * 1000;
 
 // Comandos que un agente dejó corriendo en segundo plano (un servidor, un build largo): cada comando que
 // corre Claude es una shell hija de su proceso que arranca cargando ~/.claude/shell-snapshots/snapshot-…
+// Listar todos los procesos cuesta y estos comandos duran minutos: se consulta cada 10 s, no en cada lectura.
+const COMANDOS_CADA_MS = 10 * 1000;
+let ultimosComandos = { ts: 0, porPadre: new Map() };
+
 function comandosDeFondoPorPid() {
+  const ahora = Date.now();
+  if (ahora - ultimosComandos.ts < COMANDOS_CADA_MS) return ultimosComandos.porPadre;
   let salida = '';
   try { salida = require('child_process').execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,args='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 3000 }); }
   catch { return new Map(); }
@@ -267,6 +273,7 @@ function comandosDeFondoPorPid() {
     if (!m || !m[2].includes('.claude/shell-snapshots/snapshot-')) continue;
     porPadre.set(Number(m[1]), (porPadre.get(Number(m[1])) || 0) + 1);
   }
+  ultimosComandos = { ts: ahora, porPadre };
   return porPadre;
 }
 

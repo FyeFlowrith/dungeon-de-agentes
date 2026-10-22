@@ -3,12 +3,21 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const { leerSesiones } = require('./sesiones');
-const { irATerminal, SIN_ACCESIBILIDAD } = require('./terminal');
+const { Worker } = require('worker_threads');
+const { irATerminal, SIN_ACCESIBILIDAD, matarArbol, cerrarAgenteDeTerminal } = require('./terminal');
 
 const INTERVALO_MS = 2000;
 // Un pedido de abrir sesión que ninguna ventana tomó en este tiempo se descarta.
 const PENDIENTE_MAX_MS = 90 * 1000;
+// Lee una sola ventana (la «lectora») y deja el resultado en sesiones.json para las demás. Si la lectora
+// se cierra, otra toma su lugar en la vuelta siguiente; si queda colgada, cuando vence su turno.
+const LECTORA_VENCE_MS = 10 * 1000;
+
+function escribirAtomico(archivo, texto) {
+  const tmp = `${archivo}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, texto);
+  fs.renameSync(tmp, archivo);
+}
 
 function mismaCarpeta(a, b) {
   const norm = p => path.resolve(p).replace(/\/+$/, '').toLowerCase();
@@ -46,6 +55,14 @@ class DungeonView {
     this.dirPineadas = path.join(dir, 'pineadas');
     fs.mkdirSync(this.dirPineadas, { recursive: true });
     this.archivoPineadas = path.join(this.dirPineadas, `${process.pid}.json`);
+    // Pedidos de cerrar una pestaña de Claude que está en otra ventana (<pid de esa ventana>-<ts>.json): los
+    // deja la ✕ de una tarjeta, en esta extensión o en la app de macOS.
+    this.dirCerrar = path.join(dir, 'cerrar');
+    fs.mkdirSync(this.dirCerrar, { recursive: true });
+    this.archivoLectora = path.join(dir, 'lectora.json');
+    this.archivoFoto = path.join(dir, 'sesiones.json');
+    this.worker = null;
+    this.leyendo = false;
   }
 
   // Qué sesión hay detrás de cada pestaña de Claude: lo guarda la extensión de Claude en el estado de
@@ -85,9 +102,7 @@ class DungeonView {
     const json = JSON.stringify({ pid: process.pid, carpeta, sesiones });
     if (json === this.pineadasPublicadas) return;
     this.pineadasPublicadas = json;
-    const tmp = `${this.archivoPineadas}.tmp`;
-    fs.writeFileSync(tmp, json);
-    fs.renameSync(tmp, this.archivoPineadas);
+    escribirAtomico(this.archivoPineadas, json);
     this.ultimo = '';
     this.refrescar();
   }
@@ -102,13 +117,50 @@ class DungeonView {
       let d;
       try { d = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { continue; }
       if (!vivo(d.pid)) { fs.rmSync(p, { force: true }); continue; }
-      for (const s of d.sesiones || []) out.push({ ...s, carpeta: d.carpeta });
+      for (const s of d.sesiones || []) out.push({ ...s, carpeta: d.carpeta, ventana: d.pid });
     }
     return out;
   }
 
-  borrarPineadas() {
+  // Al cerrar la ventana: deja de publicar sus pestañas y, si era la lectora, libera el lugar.
+  cerrar() {
     fs.rmSync(this.archivoPineadas, { force: true });
+    if (this.worker) this.worker.terminate();
+    try {
+      if (JSON.parse(fs.readFileSync(this.archivoLectora, 'utf8')).pid === process.pid) fs.rmSync(this.archivoLectora, { force: true });
+    } catch { /* no había lectora */ }
+  }
+
+  // Esta ventana lee si es la lectora, o si no hay ninguna viva y al día (entonces toma el lugar).
+  soyLectora() {
+    let l = null;
+    try { l = JSON.parse(fs.readFileSync(this.archivoLectora, 'utf8')); } catch { l = null; }
+    const ahora = Date.now();
+    if (l && l.pid !== process.pid && vivo(l.pid) && ahora - l.ts < LECTORA_VENCE_MS) return false;
+    escribirAtomico(this.archivoLectora, JSON.stringify({ pid: process.pid, ts: ahora }));
+    return true;
+  }
+
+  // Lo que dejó la lectora, con la edad de cada agente llevada a ahora.
+  leerFoto() {
+    let f;
+    try { f = JSON.parse(fs.readFileSync(this.archivoFoto, 'utf8')); } catch { return null; }
+    const atraso = Date.now() - f.ts;
+    return (f.sesiones || []).map(s => (s.pid ? { ...s, edadMs: s.edadMs + atraso } : s));
+  }
+
+  lector() {
+    if (this.worker) return this.worker;
+    this.worker = new Worker(path.join(__dirname, 'lector.js'));
+    this.worker.on('message', sesiones => {
+      this.leyendo = false;
+      if (!sesiones) return;
+      try { escribirAtomico(this.archivoFoto, JSON.stringify({ ts: Date.now(), sesiones })); } catch { /* la próxima */ }
+      this.mostrar(sesiones);
+    });
+    // Si el hilo se cae, se arma otro en la vuelta siguiente.
+    this.worker.on('exit', () => { this.worker = null; this.leyendo = false; });
+    return this.worker;
   }
 
   resolveWebviewView(view) {
@@ -118,6 +170,7 @@ class DungeonView {
     view.webview.html = this.html(view.webview, media);
     view.webview.onDidReceiveMessage(msg => {
       if (msg.tipo === 'abrir') this.abrir(msg.id, msg.carpeta, msg.enVsCode);
+      if (msg.tipo === 'cerrar') this.cerrarAgente(msg.id);
       if (msg.tipo === 'listo') { this.ultimo = ''; this.refrescar(); }
     });
     view.onDidChangeVisibility(() => { if (view.visible) { this.ultimo = ''; this.refrescar(); } });
@@ -186,8 +239,72 @@ class DungeonView {
     this.abrirAca(pedido.id);
   }
 
+  // La ✕ de una tarjeta. En la Terminal: termina el agente y cierra su pestaña. En VS Code: cierra su
+  // pestaña (la extensión de Claude termina el agente) y, si en unos segundos sigue vivo, lo termina.
+  async cerrarAgente(id) {
+    const s = (this.ultimas || []).find(x => x.id === id);
+    if (!s) return;
+    if (!s.enVsCode) {
+      const motivo = s.pid ? await cerrarAgenteDeTerminal(s.pid) : null;
+      if (motivo) vscode.window.showWarningMessage(motivo);
+    } else {
+      const p = this.leerPineadas().find(e => e.id === s.id ||
+        (!e.id && mismoTitulo(e.titulo, s.titulo) && mismaCarpeta(e.carpeta || '/', s.carpeta || '/')));
+      if (p && p.ventana === process.pid) await this.cerrarPestaniaAca(s.id, s.titulo);
+      else if (p) {
+        const ts = Date.now();
+        escribirAtomico(path.join(this.dirCerrar, `${p.ventana}-${ts}.json`), JSON.stringify({ id: s.id, titulo: s.titulo, ts }));
+      }
+      if (s.pid) {
+        await new Promise(r => setTimeout(r, p ? 4000 : 0)); // la otra ventana toma el pedido en ≤ 2 s
+        if (vivo(s.pid) && !await matarArbol(s.pid)) vscode.window.showWarningMessage(`No pude terminar el agente «${s.titulo}».`);
+      }
+    }
+    this.ultimo = '';
+    this.refrescar();
+  }
+
+  async cerrarPestaniaAca(id, titulo) {
+    const conocida = (await this.pestaniasDeClaude()).find(c => c.sessionId === id);
+    const buscado = conocida ? conocida.title : titulo;
+    for (const grupo of vscode.window.tabGroups.all) {
+      for (const tab of grupo.tabs) {
+        if (tab.input instanceof vscode.TabInputWebview && /claudeVSCodePanel/.test(tab.input.viewType) && mismoTitulo(tab.label, buscado)) {
+          await vscode.window.tabGroups.close(tab);
+          return;
+        }
+      }
+    }
+  }
+
+  // Corre en cada ventana: cierra las pestañas que le pidieron cerrar (y descarta pedidos viejos o de
+  // ventanas que ya no están).
+  tomarCierres() {
+    let archivos = [];
+    try { archivos = fs.readdirSync(this.dirCerrar).filter(f => /^\d+-\d+\.json$/.test(f)); } catch { return; }
+    for (const f of archivos) {
+      const [ventana, ts] = f.replace('.json', '').split('-').map(Number);
+      const p = path.join(this.dirCerrar, f);
+      if (ventana !== process.pid) {
+        if (!vivo(ventana) || Date.now() - ts > PENDIENTE_MAX_MS) fs.rmSync(p, { force: true });
+        continue;
+      }
+      let pedido = null;
+      try { pedido = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { pedido = null; }
+      fs.rmSync(p, { force: true });
+      if (pedido && Date.now() - ts <= PENDIENTE_MAX_MS) this.cerrarPestaniaAca(pedido.id, pedido.titulo);
+    }
+  }
+
   refrescar() {
-    const sesiones = leerSesiones(this.leerPineadas());
+    if (!this.soyLectora()) return this.mostrar(this.leerFoto());
+    if (this.leyendo) return; // la lectura anterior todavía no terminó
+    this.leyendo = true;
+    this.lector().postMessage(this.leerPineadas());
+  }
+
+  mostrar(sesiones) {
+    if (!sesiones) return;
     this.ultimas = sesiones;
     if (!this.view) return;
     const atencion = sesiones.filter(s => s.estado === 'blocked' || s.estado === 'limited').length;
@@ -236,7 +353,7 @@ function activate(context) {
     }),
   );
   provider.tomarPendiente(); // una ventana recién abierta para una sesión
-  const timer = setInterval(() => { provider.tomarPendiente(); provider.refrescar(); }, INTERVALO_MS);
+  const timer = setInterval(() => { provider.tomarPendiente(); provider.tomarCierres(); provider.refrescar(); }, INTERVALO_MS);
   context.subscriptions.push({ dispose: () => clearInterval(timer) });
 
   // Pineadas: al instante cuando cambian las pestañas, y cada 30 s por si Claude renombró alguna.
@@ -245,7 +362,7 @@ function activate(context) {
   pineadas();
   context.subscriptions.push(vscode.window.tabGroups.onDidChangeTabs(pineadas));
   const timerPineadas = setInterval(pineadas, 30 * 1000);
-  context.subscriptions.push({ dispose: () => { clearInterval(timerPineadas); provider.borrarPineadas(); } });
+  context.subscriptions.push({ dispose: () => { clearInterval(timerPineadas); provider.cerrar(); } });
 }
 
 function deactivate() {}

@@ -144,6 +144,17 @@ canvas {
   .card[data-estado="blocked"] { animation: none; }
 }
 
+/* ✕ para cerrar el agente: aparece al pasar el mouse, en la esquina del cuarto (debajo de la franja de contexto) */
+.cerrar { position: absolute; top: 4px; right: 4px; z-index: 2; min-width: 20px; height: 20px; padding: 0 5px;
+  border: 2px solid #140c08; border-radius: 4px; background: #2b2622; color: var(--texto);
+  font: 700 11px/1 ui-monospace, Menlo, monospace; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.hud:not([hidden]) ~ .cerrar { top: 22px; }
+.card:hover .cerrar, .card:focus-within .cerrar, .cerrar.confirmar { opacity: 1; }
+.cerrar:hover { background: #7a2a22; }
+.cerrar.confirmar { background: #b3231a; color: #fff; }
+.cerrar:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.card[data-cerrando="1"] { opacity: .4; pointer-events: none; }
+
 /* Ayuda al pasar el mouse sobre una tarjeta */
 .tip { position: fixed; z-index: 50; max-width: 280px; padding: 7px 9px; border: 1px solid #6b4e36; border-radius: 6px;
   background: #17110d; color: #f3e6d0; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre-line;

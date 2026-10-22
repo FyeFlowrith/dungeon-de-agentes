@@ -41,13 +41,19 @@
     if (y + h > window.innerHeight - 4) y = Math.max(4, e.clientY - h - m);
     tip.style.left = `${x}px`; tip.style.top = `${y}px`;
   }
+  // Sobre la ✕ no se muestra: taparía el «¿Cerrar?». Al volver a la tarjeta, se arma de nuevo.
   function conTip(el) {
-    el.addEventListener('mouseenter', e => {
+    const armar = e => {
       clearTimeout(tipEspera);
       tipDe = el;
       tipEspera = setTimeout(() => { if (tipDe !== el) return; tip.textContent = el.dataset.tip || ''; tip.hidden = !tip.textContent; ubicarTip(e); }, 450);
+    };
+    el.addEventListener('mouseenter', e => { if (!e.target.closest('.cerrar')) armar(e); });
+    el.addEventListener('mousemove', e => {
+      if (e.target.closest('.cerrar')) { clearTimeout(tipEspera); if (tipDe === el) { tipDe = null; tip.hidden = true; } return; }
+      if (tipDe !== el) armar(e);
+      else if (!tip.hidden) ubicarTip(e);
     });
-    el.addEventListener('mousemove', e => { if (!tip.hidden && tipDe === el) ubicarTip(e); });
     el.addEventListener('mouseleave', () => { clearTimeout(tipEspera); if (tipDe === el) { tipDe = null; tip.hidden = true; } });
   }
 
@@ -57,6 +63,7 @@
     el.tabIndex = 0;
     el.setAttribute('role', 'button');
     el.innerHTML = '<div class="hud" hidden><span class="lleno"></span><span class="txt"><span>CONTEXTO</span><span><b class="comp" hidden></b><span class="pct"></span></span></span></div>' +
+      '<button class="cerrar" type="button" aria-label="Cerrar el agente">✕</button>' +
       '<canvas></canvas><div class="globo" hidden></div><div class="cartel" hidden><span class="moneda">≈ u$s</span><span class="monto"></span></div>' +
       '<div class="pie"><div class="titulo"></div>' +
       '<div class="linea"><span class="rama"></span><span class="estado"></span></div></div>';
@@ -68,6 +75,26 @@
     el.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); }
     });
+    // La ✕ cierra en dos clics (el primero pregunta): termina el agente y cierra su pestaña.
+    const x = el.querySelector('.cerrar');
+    let espera = null;
+    const desarmar = () => { clearTimeout(espera); x.classList.remove('confirmar'); x.textContent = '✕'; x.setAttribute('aria-label', 'Cerrar el agente'); };
+    x.addEventListener('click', e => {
+      e.stopPropagation();
+      if (!x.classList.contains('confirmar')) {
+        x.classList.add('confirmar');
+        x.textContent = '¿Cerrar?';
+        x.setAttribute('aria-label', 'Confirmar: terminar el agente y cerrar su pestaña');
+        espera = setTimeout(desarmar, 3000);
+        return;
+      }
+      desarmar();
+      el.dataset.cerrando = '1';
+      setTimeout(() => { delete el.dataset.cerrando; }, 10000); // si no se cerró, vuelve a estar disponible
+      vscode.postMessage({ tipo: 'cerrar', id: el.dataset.id });
+    });
+    x.addEventListener('keydown', e => e.stopPropagation()); // Enter en la ✕ no abre la sesión
+    el.addEventListener('mouseleave', desarmar);
     const canvas = el.querySelector('canvas');
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;

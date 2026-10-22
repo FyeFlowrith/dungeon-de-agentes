@@ -18,7 +18,7 @@ struct Sesion: Encodable {
     let carpeta: String
     let estado: String
     let detalle: String
-    let edadMs: Double
+    var edadMs: Double
     let nacio: Double
     let heroe: Int
     let enVsCode: Bool
@@ -230,13 +230,19 @@ final class Lector {
 
     // Comandos que un agente dejó corriendo en segundo plano: cada comando de Claude es una shell hija de su
     // proceso que arranca cargando ~/.claude/shell-snapshots/snapshot-…
+    // Listar todos los procesos cuesta y estos comandos duran minutos: se consulta cada 10 s, no en cada lectura.
+    private var ultimosComandos: (ts: Double, porPadre: [Int: Int]) = (0, [:])
+
     func comandosDeFondoPorPid() -> [Int: Int] {
+        let ahora = Date().timeIntervalSince1970 * 1000
+        if ahora - ultimosComandos.ts < 10_000 { return ultimosComandos.porPadre }
         guard let salida = Foco.correr("/bin/ps", ["-axo", "pid=,ppid=,args="]) else { return [:] }
         var porPadre: [Int: Int] = [:]
         for l in salida.split(separator: "\n") where l.contains(".claude/shell-snapshots/snapshot-") {
             let campos = l.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
             if campos.count >= 2, let padre = Int(campos[1]) { porPadre[padre, default: 0] += 1 }
         }
+        ultimosComandos = (ahora, porPadre)
         return porPadre
     }
 
@@ -425,7 +431,7 @@ final class Lector {
                 if let previo = idPorTitulo[clave], previo.id != nil || ahora - previo.ts <= 60 * 1000 {
                     id = previo.id
                 } else {
-                    let vivoConTitulo = out.first { $0.carpeta == pin.carpeta && mismoTitulo($0.titulo, pin.titulo) }
+                    let vivoConTitulo = out.first { $0.carpeta == pin.carpeta && Lector.mismoTitulo($0.titulo, pin.titulo) }
                     id = vivoConTitulo?.id ?? buscarPorTitulo(pin.carpeta, pin.titulo)
                     idPorTitulo[clave] = (id, ahora)
                 }
@@ -482,7 +488,7 @@ final class Lector {
         return out
     }
 
-    private func mismoTitulo(_ a: String, _ b: String) -> Bool {
+    static func mismoTitulo(_ a: String, _ b: String) -> Bool {
         func norm(_ s: String) -> String {
             s.replacingOccurrences(of: "(…|\\.\\.\\.)\\s*$", with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespaces).lowercased()
@@ -501,7 +507,7 @@ final class Lector {
             .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
             .sorted { $0.1 > $1.1 }.prefix(40)
         for (url, _) in files {
-            if let info = infoTranscripcion(url.path), mismoTitulo(info.titulo, titulo) {
+            if let info = infoTranscripcion(url.path), Lector.mismoTitulo(info.titulo, titulo) {
                 let id = url.deletingPathExtension().lastPathComponent
                 rutas[id] = url.path
                 return id
@@ -723,6 +729,118 @@ enum Foco {
         }
         return "No encontré la pestaña de ese agente. Si macOS preguntó si «Dungeon de agentes» puede controlar la Terminal, aceptalo (Ajustes del Sistema → Privacidad y seguridad → Automatización)."
     }
+
+    // MARK: Cerrar un agente (la ✕ de la tarjeta). Misma lógica que ../vscode/terminal.js y extension.js.
+
+    static func vivo(_ pid: Int) -> Bool {
+        kill(pid_t(pid), 0) == 0 || errno == EPERM
+    }
+
+    /// Termina el proceso del agente y todo lo que cuelga de él (subagentes, comandos, MCP). true si murió.
+    static func matarArbol(_ pid: Int) -> Bool {
+        var hijos: [Int: [Int]] = [:]
+        for l in (correr("/bin/ps", ["-axo", "pid=,ppid="]) ?? "").split(separator: "\n") {
+            let c = l.split(separator: " ", omittingEmptySubsequences: true).compactMap { Int($0) }
+            if c.count == 2 { hijos[c[1], default: []].append(c[0]) }
+        }
+        var todos: [Int] = [], pila = [pid]
+        while let p = pila.popLast() {
+            guard p > 1, p != Int(getpid()), !todos.contains(p) else { continue }
+            todos.append(p)
+            pila.append(contentsOf: hijos[p] ?? [])
+        }
+        for p in todos { kill(pid_t(p), SIGTERM) }
+        var intentos = 0
+        while intentos < 30, todos.contains(where: { vivo($0) }) { Thread.sleep(forTimeInterval: 0.1); intentos += 1 }
+        if todos.contains(where: { vivo($0) }) {
+            for p in todos { kill(pid_t(p), SIGKILL) }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        return !vivo(pid)
+    }
+
+    /// Termina un agente que corre en una terminal y cierra su pestaña (en la Terminal, solo si ya no corre
+    /// nada más que la shell). Devuelve nil o el motivo para mostrar.
+    static func cerrarAgenteDeTerminal(_ pid: Int) -> String? {
+        guard let tty = correr("/bin/ps", ["-o", "tty=", "-p", String(pid)]), !tty.isEmpty else { return nil }
+        guard matarArbol(pid) else { return "No pude terminar el agente." }
+        if tty.hasPrefix("?") { return nil }
+        let dev = "/dev/\(tty)"
+        Thread.sleep(forTimeInterval: 0.3) // que la Terminal vea que el agente terminó
+        registrar("cerrar \(dev): agente \(pid) terminado")
+        if abierta("com.googlecode.iterm2"), correr("/usr/bin/osascript", ["-e", """
+            tell application id "com.googlecode.iterm2"
+              repeat with w in windows
+                repeat with t in tabs of w
+                  repeat with s in sessions of t
+                    if tty of s is "\(dev)" then
+                      tell s to close
+                      return "ok"
+                    end if
+                  end repeat
+                end repeat
+              end repeat
+            end tell
+            return "no"
+            """]) == "ok" { return nil }
+        if abierta("com.apple.Terminal"), correr("/usr/bin/osascript", ["-e", """
+            tell application id "com.apple.Terminal"
+              repeat with i from 1 to (count of windows)
+                repeat with j from 1 to (count of tabs of window i)
+                  if tty of tab j of window i is "\(dev)" then
+                    set t to tab j of window i
+                    set procesos to (get processes of t)
+                    repeat with k from 1 to (count of procesos)
+                      if {item k of procesos} is not in {"login", "-zsh", "zsh", "-bash", "bash", "-sh", "sh", "-fish", "fish"} then return "ocupada"
+                    end repeat
+                    if (count of tabs of window i) is 1 then
+                      close window i
+                    else
+                      do script "exit" in t
+                    end if
+                    return "ok"
+                  end if
+                end repeat
+              end repeat
+            end tell
+            return "no"
+            """]) == "ocupada" {
+            return "Terminé el agente, pero dejé abierta su pestaña de la Terminal porque tiene otros procesos corriendo."
+        }
+        return nil
+    }
+
+    /// Le pide a la ventana de VS Code que tiene la pestaña de esa sesión que la cierre: le deja el pedido
+    /// en <globalStorage>/cerrar/<pid de la ventana>-<ts>.json (lo toma la extensión). true si encontró la ventana.
+    static func pedirCierreEnVsCode(id: String, titulo: String, carpeta: String) -> Bool {
+        let fm = FileManager.default
+        let norm = { (p: String) in p.replacingOccurrences(of: "/+$", with: "", options: .regularExpression).lowercased() }
+        let global = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Code/User/globalStorage")
+        let dirs = ((try? fm.contentsOfDirectory(atPath: global.path)) ?? []).filter { $0.lowercased().hasSuffix(".dungeon-de-agentes") }
+        for d in dirs {
+            let base = global.appendingPathComponent(d)
+            let dir = base.appendingPathComponent("pineadas")
+            for f in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where f.range(of: "^\\d+\\.json$", options: .regularExpression) != nil {
+                guard let data = fm.contents(atPath: dir.appendingPathComponent(f).path),
+                      let p = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      let ventana = p["pid"] as? Int, vivo(ventana) else { continue }
+                let deLaVentana = norm(p["carpeta"] as? String ?? "")
+                let tiene = (p["sesiones"] as? [[String: Any]] ?? []).contains { s in
+                    if let sid = s["id"] as? String { return sid == id }
+                    return deLaVentana == norm(carpeta) && Lector.mismoTitulo(s["titulo"] as? String ?? "", titulo)
+                }
+                guard tiene else { continue }
+                let ts = Int(Date().timeIntervalSince1970 * 1000)
+                let cerrar = base.appendingPathComponent("cerrar")
+                try? fm.createDirectory(at: cerrar, withIntermediateDirectories: true)
+                guard let pedido = try? JSONSerialization.data(withJSONObject: ["id": id, "titulo": titulo, "ts": ts] as [String: Any]),
+                      (try? pedido.write(to: cerrar.appendingPathComponent("\(ventana)-\(ts).json"), options: .atomic)) != nil else { return false }
+                registrar("cerrar en VS Code: sesión \(id) en la ventana \(ventana)")
+                return true
+            }
+        }
+        return false
+    }
 }
 
 // MARK: - App
@@ -735,6 +853,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     let cola = DispatchQueue(label: "dungeon.lector")
     var ultimas: [Sesion] = []
     var ultimoJson = ""
+    var leyendo = false
     var atencionAntes = 0
     // «Siempre visible»: la ventana queda por encima de todo (también de apps a pantalla completa y en
     // todos los escritorios). Se recuerda entre aperturas.
@@ -859,18 +978,25 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
     }
 
     func refrescar() {
+        guard !leyendo else { return } // la lectura anterior todavía no terminó: no se encolan más
+        leyendo = true
         cola.async { [weak self] in
             guard let self else { return }
             let sesiones = self.lector.leer()
-            let json = (try? JSONEncoder().encode(sesiones)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
+            let codificar = { (s: [Sesion]) in (try? JSONEncoder().encode(s)).map { String(decoding: $0, as: UTF8.self) } ?? "[]" }
+            // Para comparar con lo anterior, la edad va redondeada a medio minuto (como en la extensión): si no,
+            // cambia siempre y la vista se actualizaría cada 2 s sin cambios reales.
+            let comparable = codificar(sesiones.map { s -> Sesion in var c = s; c.edadMs = (s.edadMs / 30_000).rounded(); return c })
+            let json = codificar(sesiones)
             DispatchQueue.main.async {
+                self.leyendo = false
                 self.ultimas = sesiones
                 let atencion = sesiones.filter { $0.estado == "blocked" || $0.estado == "limited" }.count
                 NSApp.dockTile.badgeLabel = atencion > 0 ? String(atencion) : nil
                 if atencion > self.atencionAntes { NSApp.requestUserAttention(.informationalRequest) }
                 self.atencionAntes = atencion
-                guard json != self.ultimoJson else { return }
-                self.ultimoJson = json
+                guard comparable != self.ultimoJson else { return }
+                self.ultimoJson = comparable
                 self.web.evaluateJavaScript("window.recibir(\(json))", completionHandler: nil)
             }
         }
@@ -880,6 +1006,32 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMess
         guard let msg = message.body as? [String: Any], let tipo = msg["tipo"] as? String else { return }
         if tipo == "listo" { ultimoJson = ""; refrescar(); aplicarSiempreVisible(); return }
         if tipo == "siempreVisible" { alternarSiempreVisible(); return }
+        if tipo == "cerrar", let id = msg["id"] as? String, let s = ultimas.first(where: { $0.id == id }) {
+            let deVsCode = s.pid == 0 || lector.esDeVsCode(pid: s.pid)
+            DispatchQueue.global().async {
+                var motivo: String? = nil
+                if !deVsCode {
+                    motivo = Foco.cerrarAgenteDeTerminal(s.pid)
+                } else {
+                    // Se cierra su pestaña (la extensión de Claude termina el agente) y, si sigue vivo, se termina acá.
+                    let pedida = Foco.pedirCierreEnVsCode(id: s.id, titulo: s.titulo, carpeta: s.carpeta)
+                    if s.pid != 0 {
+                        if pedida { Thread.sleep(forTimeInterval: 4) } // la ventana toma el pedido en ≤ 2 s
+                        if Foco.vivo(s.pid), !Foco.matarArbol(s.pid) { motivo = "No pude terminar el agente." }
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.ultimoJson = ""
+                    self.refrescar()
+                    guard let motivo else { return }
+                    let alerta = NSAlert()
+                    alerta.messageText = s.titulo
+                    alerta.informativeText = motivo
+                    alerta.beginSheetModal(for: self.ventana)
+                }
+            }
+            return
+        }
         guard tipo == "abrir", let id = msg["id"] as? String, let s = ultimas.first(where: { $0.id == id }) else { return }
         let deVsCode = s.pid == 0 || lector.esDeVsCode(pid: s.pid) // pid 0: pineada de VS Code sin agente
         DispatchQueue.global().async {
